@@ -1,0 +1,33 @@
+{
+  "name": "predictions",
+
+  "tree": {
+    "$className": "DataModel",
+
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+
+      "Packages": {
+        "$className": "Folder",
+
+        "Predictions": {
+          "$path": "src"
+        }
+      }
+    },
+
+    "ServerScriptService": {
+        "Channel": {
+            "$path": "tests/server"
+        }
+    },
+
+    "StarterPlayer": {
+      "StarterPlayerScripts": {
+        "Predictions": {
+          "$path": "tests/client"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,10 @@
+# Project place file
+/channel.rbxlx
+
+# Roblox Studio lock files
+/*.rbxlx.lock
+/*.rbxl.lock
+
+wally.lock
+.vscode
+sourcemap.json

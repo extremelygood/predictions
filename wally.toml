@@ -1,0 +1,9 @@
+[package]
+name = "extremelygood/predictions"
+version = "0.1.0"
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+description = "A library for enabling clientside predictions of state with natural sequence based reconciliation"
+exclude = ["tests", "selene.toml", "rokit.toml", "dev.project.json"]
+
+[dependencies]
