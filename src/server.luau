@@ -14,7 +14,7 @@ end
 
 local function validatePayload<Payload>(definition: Types.ActionDefinition<any, Payload>, payload: Payload): boolean
 	local accepted = false
-	local succeeded, failure = xpcall(function()
+	local succeeded, failure = (xpcall :: any)(function()
 		accepted = definition.validate(payload) == true
 	end, traceback)
 
@@ -33,7 +33,7 @@ local function authorize<Actor>(
 	payload: any
 ): boolean
 	local accepted = false
-	local succeeded, failure = xpcall(function()
+	local succeeded, failure = (xpcall :: any)(function()
 		accepted = callback(actor, payload) == true
 	end, traceback)
 
@@ -84,7 +84,10 @@ local function createServer<State, Actor>(config: Types.ServerConfig<State, Acto
 	): Types.BoundAction<Payload>
 		Action.assertDefinition(definition)
 		assert(registry[definition.id] == nil, `[Predictions] Action id "{definition.id}" is already registered`)
-		assert(options == nil or type(options) == "table", `[Predictions] Options for action "{definition.id}" must be a table`)
+		assert(
+			options == nil or type(options) == "table",
+			`[Predictions] Options for action "{definition.id}" must be a table`
+		)
 		assert(
 			options == nil or options.acceptClient == nil or type(options.acceptClient) == "function",
 			`[Predictions] acceptClient for action "{definition.id}" must be a function`
@@ -101,7 +104,10 @@ local function createServer<State, Actor>(config: Types.ServerConfig<State, Acto
 			end
 
 			local actionTime = now()
-			assert(isFiniteNumber(actionTime), `[Predictions] Clock returned an invalid timestamp for action "{definition.id}"`)
+			assert(
+				isFiniteNumber(actionTime),
+				`[Predictions] Clock returned an invalid timestamp for action "{definition.id}"`
+			)
 
 			local state = getState()
 			local accepted, nextState, effects = runReducer(definition, state, payload, {
@@ -116,9 +122,9 @@ local function createServer<State, Actor>(config: Types.ServerConfig<State, Acto
 			return true
 		end
 
-		return table.freeze({
+		return {
 			dispatch = dispatch,
-		})
+		}
 	end
 
 	local function commitRejection(actor: Actor, sequence: Types.Sequence)
@@ -183,10 +189,10 @@ local function createServer<State, Actor>(config: Types.ServerConfig<State, Acto
 		end)
 	end
 
-	return table.freeze({
+	return {
 		register = register,
 		receive = receive,
-	})
+	}
 end
 
 return createServer

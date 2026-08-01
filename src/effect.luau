@@ -35,13 +35,13 @@ local function defineEffect<Payload>(config: Types.EffectConfig): Types.Effect<P
 			end
 		end
 
-		return table.freeze({
+		return {
 			disconnect = disconnect,
-		})
+		}
 	end
 
 	local function deliver(payload: Payload)
-		local snapshot: { Types.EffectListener<Payload> } = table.create(#listeners)
+		local snapshot: { Types.EffectListener<Payload> } = table.create(#listeners) :: any
 		for _, entry in listeners do
 			table.insert(snapshot, entry.listener)
 		end
@@ -64,11 +64,11 @@ local function defineEffect<Payload>(config: Types.EffectConfig): Types.Effect<P
 		EffectScope.emit(name, deliver :: any, payload)
 	end
 
-	return table.freeze({
+	return {
 		name = name,
 		emit = emit,
 		connect = connect,
-	})
+	}
 end
 
 return {

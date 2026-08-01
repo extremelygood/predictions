@@ -1,5 +1,7 @@
 --!strict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local _types = require(ReplicatedStorage.Packages.Predictions._types)
 local Action = require(script.Parent.action)
 local EffectScope = require(script.Parent["_effect-scope"])
 local Types = require(script.Parent._types)
@@ -14,7 +16,7 @@ end
 
 local function validatePayload<Payload>(definition: Types.ActionDefinition<any, Payload>, payload: Payload): boolean
 	local accepted = false
-	local succeeded, failure = xpcall(function()
+	local succeeded, failure = (xpcall :: any)(function()
 		accepted = definition.validate(payload) == true
 	end, traceback)
 
@@ -59,9 +61,7 @@ local function createClient<State>(config: Types.ClientConfig<State>): Types.Cli
 	local pendingActions: { Types.PendingAction<State> } = {}
 	local registry: Types.ClientActionRegistry<State> = {}
 
-	local function register<Payload>(
-		definition: Types.ActionDefinition<State, Payload>
-	): Types.BoundAction<Payload>
+	local function register<Payload>(definition: Types.ActionDefinition<State, Payload>): Types.BoundAction<Payload>
 		Action.assertDefinition(definition)
 		assert(registry[definition.id] == nil, `[Predictions] Action id "{definition.id}" is already registered`)
 		registry[definition.id] = definition :: Types.ActionDefinition<State, any>
@@ -72,7 +72,10 @@ local function createClient<State>(config: Types.ClientConfig<State>): Types.Cli
 			end
 
 			local actionTime = now()
-			assert(isFiniteNumber(actionTime), `[Predictions] Clock returned an invalid timestamp for action "{definition.id}"`)
+			assert(
+				isFiniteNumber(actionTime),
+				`[Predictions] Clock returned an invalid timestamp for action "{definition.id}"`
+			)
 
 			local envelope: Types.ActionEnvelope<Payload> = {
 				actionId = definition.id,
@@ -101,9 +104,9 @@ local function createClient<State>(config: Types.ClientConfig<State>): Types.Cli
 			return true
 		end
 
-		return table.freeze({
+		return {
 			dispatch = dispatch,
-		})
+		}
 	end
 
 	local function reconcile(nextAuthoritativeState: State, processedSequence: Types.Sequence)
@@ -124,14 +127,9 @@ local function createClient<State>(config: Types.ClientConfig<State>): Types.Cli
 
 		local replayedState = authoritativeState
 		for _, pending in pendingActions do
-			local accepted, nextState = runReducer(
-				pending.definition,
-				replayedState,
-				pending.envelope.payload,
-				{
-					actionTime = pending.envelope.actionTime,
-				}
-			)
+			local accepted, nextState = runReducer(pending.definition, replayedState, pending.envelope.payload, {
+				actionTime = pending.envelope.actionTime,
+			})
 			if accepted then
 				replayedState = nextState :: State
 			end
@@ -153,13 +151,13 @@ local function createClient<State>(config: Types.ClientConfig<State>): Types.Cli
 		return #pendingActions
 	end
 
-	return table.freeze({
+	return {
 		register = register,
 		reconcile = reconcile,
 		getAuthoritativeState = getAuthoritativeState,
 		getPredictedState = getPredictedState,
 		getPendingCount = getPendingCount,
-	})
+	}
 end
 
 return createClient
