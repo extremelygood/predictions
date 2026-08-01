@@ -52,7 +52,7 @@ No runtime registration API is needed for effects.
 
 ## Emitting from a reducer
 
-Effects are callable inside reducers:
+Effects are emitted through their closure inside reducers:
 
 ```lua
 local FireWeapon = Prediction.defineAction({
@@ -66,7 +66,7 @@ local FireWeapon = Prediction.defineAction({
             return nil
         end
 
-        WeaponFired({
+        WeaponFired.emit({
             characterId = payload.characterId,
             toolId = payload.toolId,
         })
@@ -76,7 +76,7 @@ local FireWeapon = Prediction.defineAction({
 })
 ```
 
-Calling an effect does not immediately invoke listeners. It records the effect in the current reducer execution.
+Calling `emit` does not immediately invoke listeners. It records the effect in the current reducer execution.
 
 After reduction:
 

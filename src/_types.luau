@@ -49,15 +49,16 @@ export type EffectConnection = {
 	disconnect: () -> (),
 }
 
-export type Effect<Payload> = ((payload: Payload) -> ()) & {
+export type Effect<Payload> = {
 	name: string,
+	emit: (payload: Payload) -> (),
 	connect: (listener: EffectListener<Payload>) -> EffectConnection,
 }
 
 -- Effect emissions are deliberately type-erased inside a collector because one
 -- reducer may emit several effects with unrelated payload types.
 export type EffectEmission = {
-	effect: Effect<any>,
+	deliver: (payload: any) -> (),
 	payload: any,
 }
 

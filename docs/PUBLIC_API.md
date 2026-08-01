@@ -103,7 +103,7 @@ local function reduceEquipTool(state, payload)
         return nil
     end
 
-    ToolEquipped(payload)
+    ToolEquipped.emit(payload)
     return nextState
 end
 ```
@@ -131,7 +131,7 @@ server.register(actionDefinition, options?)
 server.receive(player, envelope)
 serverAction.dispatch(payload)
 
-effect(payload)
+effect.emit(payload)
 effect.connect(callback)
 connection.disconnect()
 

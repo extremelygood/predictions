@@ -40,9 +40,9 @@ Each runtime keeps an internal action-ID registry. Duplicate IDs fail during reg
 
 ## Effect scope
 
-`defineEffect` creates a local signal-like definition containing at least a diagnostic `name` and listener connections.
+`defineEffect` creates a local signal-like definition containing a diagnostic `name`, an `emit` closure, and listener connections.
 
-Calling an effect during reduction appends its definition and payload to the currently active effect collector.
+Calling an effect's `emit` closure during reduction appends its delivery closure and payload to the currently active effect collector.
 
 The collector should be scoped safely:
 
