@@ -2,6 +2,16 @@
 
 The prediction core must not import Charm Sync directly. Charm Sync support lives in a small optional adapter.
 
+```lua
+local PredictionCharmSync = require(ReplicatedStorage.Packages.Predictions.CharmSync)
+```
+
+## Compatibility
+
+The adapter targets the singleton API from `littensy/charm-sync@0.4.0`. The game injects its Charm Sync module through adapter configuration, so the core package does not install or import Charm Sync.
+
+On the client, the adapter uses `CharmSync.client.addSignals` and `CharmSync.client.patch`. On the server, it exclusively owns `CharmSync.server.connect` while started and uses `flush` and `disconnect`. Game code may continue managing subscriptions with `addSignalsToClient`, `removeSignalsFromClient`, and `removeClient`, but must not install a competing server connection.
+
 ## Design rule
 
 Prediction is opt-in per Charm signal.
@@ -21,12 +31,17 @@ Outgoing sync messages use one envelope:
 
 ```lua
 {
-    charmUpdates = updates,
+    charmUpdates = {
+        {
+            type = "patch", -- or "init"
+            data = updates,
+        },
+    },
     processedSequence = number?,
 }
 ```
 
-The Charm updates and processed sequence must not be delivered through independent channels.
+`charmUpdates` is the ordered payload array used by Charm Sync 0.4, including the complete array produced when `preserveHistory` is enabled. The Charm updates and processed sequence must not be delivered through independent channels.
 
 ## Causal watermark invariant
 
@@ -68,6 +83,10 @@ end)
 
 Predicted signal names should match top-level keys in the prediction state.
 
+The adapter registers private Charm Sync setters for predicted keys and owns those registrations for the lifetime of the client session. Do not register competing client setters for those keys. There is intentionally no client `destroy` method.
+
+The outer `Charm.batch` in the example is required. It keeps the prediction runtime's publication and the regular Charm Sync patch in one observer boundary.
+
 `apply` must perform one atomic reconciliation transaction:
 
 1. apply predicted init or patch data to authoritative shadow state;
@@ -78,9 +97,13 @@ Predicted signal names should match top-level keys in the prediction state.
 6. remove predicted signal updates from the Charm update list;
 7. return all regular updates unchanged.
 
+Update order and values are preserved. Regular-only updates are returned by identity, mixed updates are shallow-cloned, and update entries left empty by filtering are omitted. The adapter never mutates incoming updates.
+
 No intermediate state may be published between applying the patch, removing pending actions, and replaying the remaining actions.
 
 Acknowledgement-only payloads must still reconcile even when there are no Charm updates.
+
+A predicted patch without a watermark reconciles against the last cumulative watermark. A regular-only payload without a watermark does not invoke the prediction runtime. Malformed updates and watermarks that move backwards fail before any authoritative shadow state is changed.
 
 ## Server adapter
 
@@ -96,9 +119,15 @@ local predictionSyncServer = PredictionCharmSync.server({
 predictionSyncServer.start()
 ```
 
+`start` and `destroy` are idempotent. The adapter must be started before its replication bridge is used to process actions. Destroying it stops automatic syncing and clears pending watermark records.
+
 For an accepted action that changes predicted Charm state, the state mutation and processed-sequence advancement must occur in the same server batching boundary. The adapter then flushes one payload containing both the resulting Charm updates and the new watermark.
 
 The server must not send an independent acknowledgement before the corresponding Charm patch is emitted.
+
+Charm Sync 0.4 starts its connected callback with `task.spawn` during `flush`. The adapter installs the pending watermark before applying state, forces a flush, and lets that callback consume the watermark when a patch was produced. Only a watermark record still present after `flush` may use the acknowledgement-only fallback.
+
+Reducers, publishers, transport callbacks, and Charm Sync flush behavior must remain synchronous and non-yielding across this commit boundary. Predicted signals must already be subscribed to the originating actor through Charm Sync; the adapter does not manage subscriptions.
 
 ## Acknowledgement-only payloads
 

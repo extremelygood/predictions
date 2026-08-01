@@ -20,6 +20,8 @@ PredictionCharmSync/
 
 The private structure may differ. Preserve the public API described in the other documents.
 
+In this package, the optional adapter is implemented as the `CharmSync` child ModuleScript beneath `Prediction`, so consumers load it through `Predictions.CharmSync` without causing the core entrypoint to import Charm Sync.
+
 ## Closure-based public objects
 
 Every public object returned by the library must expose functions as closures. Calls use dot syntax and functions must not depend on an implicit `self` parameter. This applies to runtimes, bound actions, effects, adapter objects, and returned connections.
@@ -117,6 +119,7 @@ It must not call `acceptClient`, create a client sequence, or change acknowledge
 
 ## Charm Sync invariants
 
+- The adapter targets the injected Charm Sync 0.4 singleton API and is loaded through `Predictions.CharmSync`.
 - Predicted signals are opt-in.
 - Mixed predicted and regular payloads are supported.
 - Regular signals are forwarded unchanged.
@@ -128,6 +131,8 @@ It must not call `acceptClient`, create a client sequence, or change acknowledge
 - A rejected or no-op action can be cleared through an acknowledgement-only payload only after the flush confirms no relevant patch remains pending.
 - The normal patch path and acknowledgement-only fallback must not race.
 - Effects are never included in Charm Sync payloads.
+- The adapter owns the server `connect` callback and client predicted-key setters for its lifetime.
+- The caller batches client adapter application and regular Charm patching together.
 
 ## Required behavioral tests
 
@@ -158,6 +163,9 @@ It must not call `acceptClient`, create a client sequence, or change acknowledge
 25. a failing effect listener does not prevent another listener from running;
 26. a re-entrant listener cannot overtake the action envelope or replication commit that scheduled it;
 27. disconnecting after scheduling does not cancel a captured delivery.
+28. init, patch, and preserved-history arrays retain update order while splitting predicted and regular keys;
+29. a patch sent to another actor does not inherit the committing actor's watermark;
+30. malformed or regressing client sync payloads fail before changing authoritative shadow state.
 
 ## Simplicity constraints
 

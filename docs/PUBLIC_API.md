@@ -72,11 +72,22 @@ equipTool.dispatch({
 
 ## Sync delivery contract
 
+The optional adapter is a child module and targets Charm Sync 0.4:
+
+```lua
+local PredictionCharmSync = require(ReplicatedStorage.Packages.Predictions.CharmSync)
+```
+
 The Charm Sync adapter delivers authoritative updates and the cumulative processed sequence in one envelope:
 
 ```lua
 {
-    charmUpdates = updates,
+    charmUpdates = {
+        {
+            type = "patch",
+            data = updates,
+        },
+    },
     processedSequence = 12,
 }
 ```
