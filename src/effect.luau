@@ -47,16 +47,7 @@ local function defineEffect<Payload>(config: Types.EffectConfig): Types.Effect<P
 		end
 
 		for _, listener in snapshot do
-			local failure: string? = nil
-			local succeeded = xpcall(function()
-				listener(payload)
-			end, function(message)
-				failure = debug.traceback(tostring(message), 2)
-				return failure
-			end)
-			if not succeeded then
-				warn(`[Predictions] Listener for effect "{name}" failed:\n{failure}`)
-			end
+			task.defer(listener, payload)
 		end
 	end
 

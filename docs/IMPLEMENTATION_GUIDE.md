@@ -51,7 +51,7 @@ The collector should be scoped safely:
 - reject emission when no reducer scope is active;
 - assume reducers do not yield.
 
-The runtime decides whether collected effects are delivered or discarded.
+The runtime decides whether collected effects are scheduled or discarded. Each captured listener is scheduled independently with `task.defer`; listener errors use native task error reporting and listener completion order is not guaranteed.
 
 ## Client dispatch
 
@@ -63,7 +63,7 @@ When a bound client action is dispatched:
 4. return `false` and discard effects if the reducer returns `nil`;
 5. queue the action;
 6. store and publish the returned predicted state;
-7. fire collected local effect listeners;
+7. schedule collected local effect listeners;
 8. send the action envelope;
 9. return `true`.
 
@@ -92,7 +92,7 @@ For the next expected client sequence:
 4. run optional `acceptClient`;
 5. run the reducer against authoritative state while collecting effects;
 6. publish accepted state and advance the processed sequence in the same batching boundary;
-7. fire local effects only when the reducer returns a state;
+7. schedule local effects only when the reducer returns a state;
 8. flush replication so the authoritative patch and watermark are sent together;
 9. send an acknowledgement-only payload only when the flush produced no causally relevant predicted patch.
 
@@ -110,7 +110,7 @@ A bound server action's `dispatch(payload)` should:
 2. run the reducer while collecting effects;
 3. discard effects and return `false` on `nil`;
 4. publish accepted state;
-5. fire local server-side effect listeners;
+5. schedule local server-side effect listeners;
 6. return `true`.
 
 It must not call `acceptClient`, create a client sequence, or change acknowledgement state.
@@ -154,6 +154,10 @@ It must not call `acceptClient`, create a client sequence, or change acknowledge
 21. multiple effect listeners connect and disconnect correctly;
 22. a mixed Charm payload reconciles predicted signals and forwards regular signals unchanged;
 23. no effect data is serialized into action or Charm Sync payloads.
+24. a yielding effect listener does not block dispatch or another listener;
+25. a failing effect listener does not prevent another listener from running;
+26. a re-entrant listener cannot overtake the action envelope or replication commit that scheduled it;
+27. disconnecting after scheduling does not cancel a captured delivery.
 
 ## Simplicity constraints
 

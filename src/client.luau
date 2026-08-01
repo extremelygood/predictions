@@ -1,7 +1,5 @@
 --!strict
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local _types = require(ReplicatedStorage.Packages.Predictions._types)
 local Action = require(script.Parent.action)
 local EffectScope = require(script.Parent["_effect-scope"])
 local Types = require(script.Parent._types)

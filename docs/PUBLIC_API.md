@@ -108,7 +108,7 @@ local function reduceEquipTool(state, payload)
 end
 ```
 
-The runtime fires collected effects after an accepted real dispatch. It discards them during reconciliation replay.
+The runtime schedules each collected effect listener in an independent deferred task after an accepted real dispatch. A yielding or failing listener does not block dispatch or other listeners. Effects are discarded during reconciliation replay.
 
 Effects are never automatically sent over the network.
 
