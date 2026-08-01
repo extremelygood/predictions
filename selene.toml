@@ -1,0 +1,4 @@
+std = "roblox"
+
+[globals.types]
+any = true
