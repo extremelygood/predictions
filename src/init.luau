@@ -1,5 +1,7 @@
 --!strict
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local adapterMain = require(ReplicatedStorage.Packages.Predictions.charmSync.adapterMain)
 local Action = require(script.action)
 local Client = require(script.client)
 local Effect = require(script.effect)
@@ -35,6 +37,10 @@ local Prediction: Types.PredictionLibrary = {
 	defineEffect = Effect.define,
 	client = Client,
 	server = Server,
+
+	adapters = {
+		charmSync = adapterMain,
+	},
 }
 
 return table.freeze(Prediction)

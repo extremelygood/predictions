@@ -1,8 +1,8 @@
 --!strict
 
-local Client = require(script.client)
-local Server = require(script.server)
-local Types = require(script.Parent["_charm-sync-adapter-types"])
+local Client = require(script.Parent.client)
+local Server = require(script.Parent.server)
+local Types = require(script.Parent.Parent["_charm-sync-adapter-types"])
 
 export type CharmSyncData = Types.CharmSyncData
 export type CharmSyncUpdate = Types.CharmSyncUpdate
