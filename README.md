@@ -15,3 +15,19 @@ rojo serve
 ```
 
 For more help, check out [the Rojo documentation](https://rojo.space/docs).
+
+## Tests
+
+The dependency-free Charm Sync integration tests run inside Roblox Studio. Build the development place:
+
+```bash
+rojo build dev.project.json -o channel.rbxlx
+```
+
+Open `channel.rbxlx` in Studio and press **Play**. The server output reports each case and ends with:
+
+```text
+[Predictions tests] PASS: 5 tests completed
+```
+
+Any failed case raises one aggregated server error after all cases have run.

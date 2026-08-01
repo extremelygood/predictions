@@ -72,10 +72,11 @@ equipTool.dispatch({
 
 ## Sync delivery contract
 
-The optional adapter is a child module and targets Charm Sync 0.4:
+The optional adapter is exposed by the main library and targets Charm Sync 0.4:
 
 ```lua
-local PredictionCharmSync = require(ReplicatedStorage.Packages.Predictions.CharmSync)
+local Prediction = require(ReplicatedStorage.Packages.Predictions)
+local PredictionCharmSync = Prediction.adapters.charmSync
 ```
 
 The Charm Sync adapter delivers authoritative updates and the cumulative processed sequence in one envelope:
@@ -146,10 +147,10 @@ effect.emit(payload)
 effect.connect(callback)
 connection.disconnect()
 
-PredictionCharmSync.client(config)
+Prediction.adapters.charmSync.client(config)
 clientSync.apply(payload)
 
-PredictionCharmSync.server(config)
+Prediction.adapters.charmSync.server(config)
 serverSync.start()
 serverSync.destroy()
 ```

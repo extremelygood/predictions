@@ -1,9 +1,10 @@
 # Charm Sync Adapter
 
-The prediction core must not import Charm Sync directly. Charm Sync support lives in a small optional adapter.
+The prediction library does not import an external Charm Sync package. Charm Sync support is exposed through a small adapter that receives the game's Charm Sync instance through configuration.
 
 ```lua
-local PredictionCharmSync = require(ReplicatedStorage.Packages.Predictions.CharmSync)
+local Prediction = require(ReplicatedStorage.Packages.Predictions)
+local PredictionCharmSync = Prediction.adapters.charmSync
 ```
 
 ## Compatibility

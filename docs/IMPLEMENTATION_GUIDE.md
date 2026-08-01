@@ -12,15 +12,15 @@ Prediction/
 ├── server.luau
 └── types.luau
 
-PredictionCharmSync/
-├── init.luau
+Prediction/CharmSync/
+├── adapterMain.luau
 ├── client.luau
 └── server.luau
 ```
 
 The private structure may differ. Preserve the public API described in the other documents.
 
-In this package, the optional adapter is implemented as the `CharmSync` child ModuleScript beneath `Prediction`, so consumers load it through `Predictions.CharmSync` without causing the core entrypoint to import Charm Sync.
+In this package, the optional adapter is implemented beneath `Prediction` and exposed as `Prediction.adapters.charmSync`. The adapter receives the game's Charm Sync instance through configuration, so the package does not import an external Charm Sync dependency.
 
 ## Closure-based public objects
 
@@ -119,7 +119,7 @@ It must not call `acceptClient`, create a client sequence, or change acknowledge
 
 ## Charm Sync invariants
 
-- The adapter targets the injected Charm Sync 0.4 singleton API and is loaded through `Predictions.CharmSync`.
+- The adapter targets the injected Charm Sync 0.4 singleton API and is accessed through `Prediction.adapters.charmSync`.
 - Predicted signals are opt-in.
 - Mixed predicted and regular payloads are supported.
 - Regular signals are forwarded unchanged.

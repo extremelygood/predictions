@@ -30,9 +30,7 @@ export type ServerActionOptions<Actor, Payload> = Types.ServerActionOptions<Acto
 export type ServerReplication<Actor> = Types.ServerReplication<Actor>
 export type ServerConfig<State, Actor> = Types.ServerConfig<State, Actor>
 export type ServerRuntime<State, Actor> = Types.ServerRuntime<State, Actor>
-export type PredictionLibrary = Types.PredictionLibrary
-
-local Prediction: Types.PredictionLibrary = {
+local Prediction = {
 	defineAction = Action.define,
 	defineEffect = Effect.define,
 	client = Client,
@@ -42,5 +40,7 @@ local Prediction: Types.PredictionLibrary = {
 		charmSync = adapterMain,
 	},
 }
+
+export type PredictionLibrary = typeof(Prediction)
 
 return table.freeze(Prediction)

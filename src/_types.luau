@@ -126,11 +126,4 @@ export type ServerRuntime<State, Actor> = {
 	receive: (actor: Actor, envelope: unknown) -> (),
 }
 
-export type PredictionLibrary = {
-	defineAction: <State, Payload>(config: ActionConfig<State, Payload>) -> ActionDefinition<State, Payload>,
-	defineEffect: <Payload>(config: EffectConfig) -> Effect<Payload>,
-	client: <State>(config: ClientConfig<State>) -> ClientRuntime<State>,
-	server: <State, Actor>(config: ServerConfig<State, Actor>) -> ServerRuntime<State, Actor>,
-}
-
 return {}
