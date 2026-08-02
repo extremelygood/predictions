@@ -72,6 +72,7 @@ The Charm Sync adapter therefore delivers the relevant authoritative patch and i
 
 ## Documents
 
+- [`demo/README.md`](demo/README.md) walks through a predicted counter and a regular server-status store sharing one Charm Sync connection.
 - [`PUBLIC_API.md`](PUBLIC_API.md) gives the compact intended public surface.
 - [`ACTIONS.md`](ACTIONS.md) defines action behavior and usage.
 - [`EFFECTS.md`](EFFECTS.md) defines local effect behavior and usage.
