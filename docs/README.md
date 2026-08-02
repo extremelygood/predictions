@@ -1,81 +1,51 @@
-# Predicted Actions Library
+# Predictions documentation
 
-## Goal
+Predictions provides client-predicted actions over server-authoritative state. A client applies an action locally for immediate feedback, sends the action to the server, and later replays any still-pending actions over the newest authoritative state.
 
-Create a small reusable Luau library for client-predicted actions over authoritative state.
+The package is designed for top-level state that is already replicated with Charm Sync 0.4. Prediction is enabled per signal, so predicted and ordinary Charm signals can continue to use the same sync connection.
 
-The library should allow one shared action definition to be:
+## How it fits together
 
-- predicted immediately by a client;
-- confirmed or rejected by the server;
-- replayed after authoritative corrections;
-- dispatched directly by server code through the same reducer.
+An integration has three parts:
 
-Simplicity is the primary design constraint.
+1. Define actions in shared code. Each action validates a payload and reduces the current state into a new state.
+2. Register those actions with a client runtime and a server runtime.
+3. Connect both runtimes through your action remote and the included Charm Sync adapter.
 
-## API style
+```text
+client dispatch
+    -> predict and publish locally
+    -> send action envelope
+    -> validate and reduce on server
+    -> sync authoritative state and processed sequence
+    -> reconcile and replay remaining actions on client
+```
 
-All library-created objects use closure-based APIs. Public functions are called with dot syntax and do not receive an implicit `self` argument.
+Reducers return complete state values. The runtime passes those values to your `publish` callback, which updates the stores used by the rest of the game.
+
+## Requirements
+
+- A shared Luau state shape on the client and server.
+- A reliable, ordered client-to-server transport for action envelopes.
+- Charm Sync 0.4 for authoritative state replication.
+- Top-level state keys that match the names of the predicted Charm signals.
+
+Predictions does not create remotes, install Charm Sync, or manage Charm Sync subscriptions. Those stay in game code.
+
+## Read next
+
+- [Demo](demo/README.md) — a complete predicted counter alongside a regular server-only value.
+- [Actions](ACTIONS.md) — define reducers and validate or authorize dispatches.
+- [Runtimes](RUNTIMES.md) — set up the client and server.
+- [Charm Sync](CHARM_SYNC.md) — connect authoritative replication and reconciliation.
+- [Effects](EFFECTS.md) — trigger local one-time presentation work from accepted actions.
+- [API reference](PUBLIC_API.md) — the exported functions, objects, and payloads.
+
+All Predictions objects use dot syntax:
 
 ```lua
 local action = client.register(ActionDefinition)
 action.dispatch(payload)
-
-local connection = Effect.connect(listener)
-connection.disconnect()
 ```
 
-Do not expose colon-style methods such as `action:dispatch(payload)`. Roblox built-in APIs may still use their native colon syntax where required.
-
-## Core concepts
-
-The public model has four pieces:
-
-1. **Actions** describe deterministic state transitions.
-2. **Effects** describe local, one-time consequences emitted by actions.
-3. **Runtimes** execute actions on the client or server.
-4. **The Charm Sync adapter** reconciles selected predicted signals while letting all other signals use ordinary Charm Sync.
-
-Reducers calculate absolute state. Publishers expose the final state to the game's stores.
-
-Effects are local only. The library must not serialize or replicate them.
-
-## Scope for version one
-
-Include:
-
-- shared action definitions;
-- shared effect definitions;
-- client prediction and pending-action replay;
-- authoritative server execution;
-- cumulative acknowledgements;
-- direct server dispatch through the same action reducer;
-- opt-in Charm signal prediction;
-- ordinary Charm Sync passthrough for all other signals;
-- strict Luau types and focused behavioral tests.
-
-Do not include:
-
-- automatic effect networking;
-- middleware pipelines;
-- action inheritance;
-- automatic action discovery;
-- retries for unreliable transports;
-- generalized change-set optimization;
-- materialization or frame-based projection.
-
-## Core reconciliation guarantee
-
-A processed client sequence is an authoritative-state watermark, not an independent acknowledgement. The client may remove pending actions only while applying authoritative state that already reflects every accepted action through that sequence.
-
-The Charm Sync adapter therefore delivers the relevant authoritative patch and its processed sequence together and publishes the reconciled predicted state only once.
-
-## Documents
-
-- [`demo/README.md`](demo/README.md) walks through a predicted counter and a regular server-status store sharing one Charm Sync connection.
-- [`PUBLIC_API.md`](PUBLIC_API.md) gives the compact intended public surface.
-- [`ACTIONS.md`](ACTIONS.md) defines action behavior and usage.
-- [`EFFECTS.md`](EFFECTS.md) defines local effect behavior and usage.
-- [`RUNTIMES.md`](RUNTIMES.md) covers client and server setup.
-- [`CHARM_SYNC.md`](CHARM_SYNC.md) covers the optional Charm Sync adapter.
-- [`IMPLEMENTATION_GUIDE.md`](IMPLEMENTATION_GUIDE.md) lists internal invariants and required tests.
+Roblox instances still use their normal colon syntax.

@@ -1,73 +1,41 @@
-# Effect Definitions
+# Effects
 
-Effects represent local, one-time consequences that do not reasonably belong in durable state.
+Effects are optional, local events emitted by an accepted action. They are useful for one-time presentation such as sounds, particles, camera recoil, or controller callbacks.
 
-Examples include:
+Effects are never replicated by Predictions. A shared effect definition has separate listeners in each environment.
 
-- sounds;
-- muzzle flashes;
-- camera recoil;
-- short particles;
-- local presentation callbacks.
-
-Effects are optional. Ordinary actions do not need them.
-
-## Definition
-
-The configuration is a table so more options can be added later without changing the call shape.
+## Define and connect an effect
 
 ```lua
-local WeaponFired = Prediction.defineEffect({
+local WeaponFired = Predictions.defineEffect({
     name = "WeaponFired",
 })
-```
 
-`name` is for diagnostics and debugging. Effects are not identified or decoded over the network.
-
-## Connecting listeners
-
-Scripts connect directly to the effect definition:
-
-```lua
 local connection = WeaponFired.connect(function(payload)
-    weaponPresentation.playMuzzleFlash(payload)
+    weaponPresentation.playMuzzleFlash(payload.toolId)
 end)
 ```
 
-Multiple listeners may connect independently.
+Disconnect the listener when it is no longer needed:
 
 ```lua
-WeaponFired.connect(function(payload)
-    audioController.playWeaponSound(payload)
-end)
-
-WeaponFired.connect(function(payload)
-    recoilController.apply(payload)
-end)
+connection.disconnect()
 ```
 
-The returned connection exposes `disconnect()`.
-
-No runtime registration API is needed for effects.
-
-## Emitting from a reducer
-
-Effects are emitted through their closure inside reducers:
+## Emit from a reducer
 
 ```lua
-local FireWeapon = Prediction.defineAction({
+local FireWeapon = Predictions.defineAction({
     id = "FireWeapon",
     validate = validateFireWeapon,
 
     reduce = function(state, payload)
         local nextState = consumeAmmo(state, payload)
-
         if nextState == nil then
             return nil
         end
 
         WeaponFired.emit({
-            characterId = payload.characterId,
             toolId = payload.toolId,
         })
 
@@ -76,38 +44,8 @@ local FireWeapon = Prediction.defineAction({
 })
 ```
 
-Calling `emit` does not immediately invoke listeners. It records the effect in the current reducer execution.
+`emit` records the effect while the reducer runs. Listeners are deferred until an actual dispatch is accepted. Effects collected during reconciliation replay are discarded, so replaying a pending action does not repeat its sound or particles.
 
-After reduction:
+Each listener runs in its own deferred task. A listener may yield or fail without holding up dispatch or preventing the other listeners from starting. Listener order is not guaranteed.
 
-- an accepted real client dispatch schedules the client-side listeners;
-- an accepted server execution schedules the server-side listeners;
-- a rejected action discards collected effects;
-- reconciliation replay discards collected effects.
-
-This prevents sounds and particles from replaying every time pending actions are recalculated.
-
-## Listener scheduling
-
-Each listener captured for an effect is scheduled in its own `task.defer` thread. Listener execution begins at the end of the current resumption cycle, normally after the client action has been sent or the server replication commit has completed.
-
-A listener may yield or error without preventing other listeners from running or holding up the dispatch that scheduled it. Errors are reported by Roblox's task scheduler. Listener execution and completion order are not guaranteed.
-
-Delivery uses a snapshot of the listeners connected when the effect is scheduled. Disconnecting afterward does not cancel that pending delivery, and listeners connected afterward do not receive it.
-
-## Local-only behavior
-
-The library must never automatically serialize, route, or replicate effects.
-
-The same shared effect module may have different listeners in the client and server environments, but those listeners are local to that environment.
-
-A server-originated action therefore schedules only server-side effect listeners. Other clients receive nothing unless the game explicitly uses its own networking or represents the event through replicated state.
-
-## Constraints
-
-- Emitting outside an active reducer should raise a clear error containing the effect name.
-- Reducers must not yield while effect collection is active.
-- A listener that never yields or returns can still block Roblox's cooperative scheduler.
-- Effect payloads should be treated as immutable descriptions.
-- The library does not reverse effects if a predicted action is later rejected.
-- Use effects only for consequences that are safe to happen once and end naturally.
+Only call `emit` from inside a reducer. Calling it elsewhere raises an error. Since a predicted effect cannot be undone if the server later rejects the action, use effects for consequences that are safe to play once and finish naturally.

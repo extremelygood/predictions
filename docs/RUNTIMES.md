@@ -1,11 +1,11 @@
-# Client and Server Runtimes
+# Client and server runtimes
 
-Runtimes bind shared action definitions to client-predicted or server-authoritative execution.
+Runtimes execute shared action definitions. The client keeps both authoritative and predicted state; the server reads and publishes the authoritative state.
 
-## Client runtime
+## Client
 
 ```lua
-local client = Prediction.client({
+local client = Predictions.client({
     initialState = {
         tools = toolStore.getAll(),
         abilities = abilityStore.getAll(),
@@ -17,47 +17,55 @@ local client = Prediction.client({
     end,
 
     send = function(envelope)
-        ACTION_CHANNEL.fireServer(envelope)
+        predictionAction:FireServer(envelope)
     end,
 
     now = function()
         return workspace:GetServerTimeNow()
     end,
 })
+
+local equipTool = client.register(EquipTool)
 ```
 
-`publish` receives the complete final predicted state and updates the game-facing client stores.
+`initialState` seeds both client state copies. `publish` receives the complete predicted state after a local dispatch or reconciliation. `send` forwards a validated action envelope through your transport, and `now` supplies a finite action timestamp.
 
-The client runtime owns:
+The client exposes a few inspection methods:
 
-- authoritative shadow state;
-- current predicted state;
-- the next client sequence;
-- ordered pending actions;
-- registered action definitions.
+```lua
+client.getAuthoritativeState()
+client.getPredictedState()
+client.getPendingCount()
+```
 
-## Client reconciliation
+Most games only need these for debugging or tests.
+
+### Reconciliation
+
+The low-level reconciliation call is:
 
 ```lua
 client.reconcile(authoritativeState, processedSequence)
 ```
 
-`processedSequence` is a watermark for the supplied authoritative state. It may only acknowledge actions whose accepted results are already represented by that state.
+It replaces the authoritative state, removes pending actions through the processed sequence, replays the remaining actions, and publishes once. When using Charm Sync, call the adapter's `apply` method instead; it builds the authoritative state and invokes reconciliation at the correct time.
 
-Reconciliation must execute as one transaction:
+## Server
 
-1. replace authoritative shadow state;
-2. remove cumulatively acknowledged pending actions;
-3. replay remaining pending actions in order;
-4. discard all effects produced during replay;
-5. publish the final predicted state exactly once.
-
-The runtime must never publish after step 2 and then publish again after replay. Otherwise the client can briefly show an acknowledged action disappearing before its authoritative result is visible.
-
-## Server runtime
+Create and start the server Charm Sync adapter before allowing action messages to reach the runtime:
 
 ```lua
-local server = Prediction.server({
+local predictionSync = Predictions.adapters.charmSync.server({
+    charmSync = CharmSync,
+
+    send = function(player, payload)
+        stateSync:FireClient(player, payload)
+    end,
+})
+
+predictionSync.start()
+
+local server = Predictions.server({
     getState = function()
         return {
             tools = toolStore.getAll(),
@@ -74,21 +82,27 @@ local server = Prediction.server({
         return workspace:GetServerTimeNow()
     end,
 
-    replication = predictionSyncServer,
+    replication = predictionSync,
 })
-```
 
-The server reads authoritative state through `getState` and commits accepted results through `publish`.
+server.register(EquipTool, {
+    acceptClient = canEquipTool,
+})
 
-## Receiving client requests
-
-```lua
-ACTION_CHANNEL.onMessage(function(player, envelope)
+predictionAction.OnServerEvent:Connect(function(player, envelope)
     server.receive(player, envelope)
 end)
 ```
 
-The transport envelope is library-owned:
+`receive` validates action IDs, payloads, timestamps, authorization, and sequence order. A handled request advances the player's cumulative processed sequence even when it is rejected, allowing the client to remove the corresponding prediction.
+
+The transport must deliver client action envelopes reliably and in order. Stale messages and sequence gaps are ignored.
+
+Call `predictionSync.destroy()` when the adapter should disconnect from Charm Sync. Starting and destroying it more than once is safe.
+
+## Action envelope
+
+The runtime sends this table through the client `send` callback:
 
 ```lua
 {
@@ -99,14 +113,4 @@ The transport envelope is library-owned:
 }
 ```
 
-The server runtime handles envelope validation, sequencing, action lookup, payload validation, optional `acceptClient`, reduction, publication, effect delivery to local listeners, and acknowledgement.
-
-Rejected client requests must still be acknowledged when their expected sequence is processed. Accepted actions that change state must advance their processed sequence only in causal alignment with the authoritative replication containing that change.
-
-## Publishing
-
-Reducers calculate state. Publishers expose it.
-
-Version one should pass the complete final state to `publish`; it does not need generalized change sets.
-
-Effects should fire only after an accepted state calculation and should never fire during reconciliation replay.
+Treat the envelope as library-owned data. Game code should forward it without changing its fields.

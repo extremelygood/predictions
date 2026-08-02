@@ -1,58 +1,40 @@
-# Action Definitions
+# Actions
 
-Actions describe deterministic state transitions. An action definition is shared between the client and server.
+An action is a shared definition of a state transition. Register the same definition on the client and server so both sides validate and reduce a payload in the same way.
 
-## Definition
+## Define an action
 
 ```lua
 --!strict
-local Prediction = require(ReplicatedStorage.Packages.Prediction)
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Predictions = require(ReplicatedStorage.Packages.Predictions)
 
-type GameState = {
-    tools: {
-        [string]: {
-            ownerCharacterId: string,
-            isEquipped: boolean,
-        },
-    },
+type State = {
+    equippedTool: string?,
 }
 
-type EquipToolPayload = {
-    characterId: string,
+type Payload = {
     toolId: string,
 }
 
-local EquipTool = Prediction.defineAction({
+local EquipTool = Predictions.defineAction({
     id = "EquipTool",
 
-    validate = function(payload: any): boolean
-        return type(payload) == "table"
-            and type(payload.characterId) == "string"
-            and type(payload.toolId) == "string"
+    validate = function(payload: Payload): boolean
+        return type(payload) == "table" and type(payload.toolId) == "string"
     end,
 
     reduce = function(
-        state: GameState,
-        payload: EquipToolPayload,
-        _context: Prediction.ActionContext
-    ): GameState?
-        local tool = state.tools[payload.toolId]
-
-        if tool == nil or tool.ownerCharacterId ~= payload.characterId then
+        state: State,
+        payload: Payload,
+        context: Predictions.ActionContext
+    ): State?
+        if payload.toolId == "" then
             return nil
         end
 
-        if tool.isEquipped then
-            return state
-        end
-
-        local nextTools = table.clone(state.tools)
-        local nextTool = table.clone(tool)
-        nextTool.isEquipped = true
-        nextTools[payload.toolId] = nextTool
-
         local nextState = table.clone(state)
-        nextState.tools = nextTools
+        nextState.equippedTool = payload.toolId
         return nextState
     end,
 })
@@ -60,58 +42,51 @@ local EquipTool = Prediction.defineAction({
 return EquipTool
 ```
 
-## Rules
+The fields have separate jobs:
 
-- `id` is a stable network identifier.
-- `validate` checks payload structure.
-- `reduce` checks state-based game rules and calculates the next absolute state.
-- Returning `nil` rejects the action.
-- Returning the same state accepts a no-op action.
-- Reducers must not mutate their input state.
-- Reducers must not update stores, send remotes, or yield.
-- Game targets such as `characterId`, `toolId`, or `targetId` belong in the payload.
+- `id` is the stable identifier sent over the network. It must be unique within a runtime.
+- `validate` checks the payload's shape. It runs before the reducer on both client and server.
+- `reduce` applies state-dependent rules and returns the next state.
+- `context.actionTime` is the timestamp captured when the action was dispatched. Reconciliation reuses that same timestamp.
 
-## Client dispatch
+Return `nil` from `reduce` to reject an action. Returning the original state accepts it as a no-op.
+
+Reducers should be deterministic, must not mutate their input state, and must not yield. Store updates and networking belong in the runtime callbacks rather than in the reducer.
+
+## Dispatch on the client
 
 ```lua
 local equipTool = client.register(EquipTool)
 
-local applied = equipTool.dispatch({
-    characterId = localCharacterId,
-    toolId = selectedToolId,
+local accepted = equipTool.dispatch({
+    toolId = "Sword",
 })
 ```
 
-A successful client dispatch predicts immediately, queues the action, publishes the new predicted state, and sends a sequenced envelope.
+If the action is accepted locally, `dispatch` publishes the predicted state, queues the action for reconciliation, sends its envelope, and returns `true`. Invalid or reducer-rejected actions return `false` and are not sent.
 
-A locally rejected action is not queued or sent.
+## Authorize on the server
 
-## Server registration
+The server can add a check that only applies to client requests:
 
 ```lua
 local equipTool = server.register(EquipTool, {
     acceptClient = function(player, payload)
-        return payload.characterId == characterStore.getPlayerCharacterId(player)
+        return inventory.owns(player, payload.toolId)
     end,
 })
 ```
 
-`acceptClient` is optional and server-only. It checks whether the requesting player may submit that payload.
+Use `acceptClient` for permissions tied to the sending player. Put rules based only on shared state in the reducer so prediction uses the same rules.
 
-State-based checks such as ownership, cooldowns, ammunition, and entity existence belong in the reducer when that information is represented in state.
+## Dispatch on the server
 
-## Direct server dispatch
+The bound server action can also be called by server code:
 
 ```lua
-local applied = equipTool.dispatch({
-    characterId = npcCharacterId,
-    toolId = swordToolId,
+local accepted = equipTool.dispatch({
+    toolId = "Sword",
 })
 ```
 
-Direct server dispatch:
-
-- uses the same reducer;
-- does not require an actor argument;
-- does not call `acceptClient`;
-- does not create or advance a client sequence.
+A direct server dispatch validates and reduces normally, but does not call `acceptClient` and does not affect a client's sequence number.

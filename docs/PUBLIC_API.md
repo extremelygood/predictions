@@ -1,158 +1,118 @@
-# Public API
+# API reference
 
-This document locks down the intended public shape. Detailed behavior lives in the focused documents beside it.
-
-All returned objects use closure-based dot functions. No public library function requires colon syntax or an implicit `self`.
+All public functions use dot syntax. Public objects do not expect an implicit `self` argument.
 
 ## Definitions
 
-```lua
-local EquipTool = Prediction.defineAction({
-    id = "EquipTool",
-    validate = validateEquipTool,
-    reduce = reduceEquipTool,
-})
+### `Predictions.defineAction(config)`
 
-local ToolEquipped = Prediction.defineEffect({
-    name = "ToolEquipped",
+Creates a frozen action definition.
+
+```lua
+local action = Predictions.defineAction({
+    id = "EquipTool",
+    validate = function(payload): boolean
+        return type(payload) == "table" and type(payload.toolId) == "string"
+    end,
+    reduce = function(state, payload, context)
+        return nextState
+    end,
 })
 ```
 
-## Client
+`reduce` returns the next state or `nil` to reject the action. `context` contains `actionTime`.
+
+### `Predictions.defineEffect(config)`
+
+Creates a local effect with `name`, `emit(payload)`, and `connect(listener)` fields.
 
 ```lua
-local client = Prediction.client({
+local effect = Predictions.defineEffect({ name = "ToolEquipped" })
+local connection = effect.connect(listener)
+connection.disconnect()
+```
+
+`effect.emit(payload)` is valid only while an action reducer is running.
+
+## Client runtime
+
+### `Predictions.client(config)`
+
+```lua
+local client = Predictions.client({
     initialState = initialState,
     publish = publishPredictedState,
     send = sendActionEnvelope,
-    now = function()
-        return workspace:GetServerTimeNow()
-    end,
-})
-
-local equipTool = client.register(EquipTool)
-
-equipTool.dispatch({
-    characterId = localCharacterId,
-    toolId = selectedToolId,
+    now = clock,
 })
 ```
 
-## Server
+Returns:
+
+| Function | Result |
+| --- | --- |
+| `client.register(definition)` | Registers an action and returns a bound action. Duplicate IDs raise an error. |
+| `client.reconcile(state, sequence)` | Applies authoritative state, clears processed actions, replays the rest, and publishes once. |
+| `client.getAuthoritativeState()` | Returns the latest authoritative state supplied to the runtime. |
+| `client.getPredictedState()` | Returns the current state after pending actions are applied. |
+| `client.getPendingCount()` | Returns the number of actions waiting for acknowledgement. |
+
+A bound action exposes `dispatch(payload) -> boolean`.
+
+## Server runtime
+
+### `Predictions.server(config)`
 
 ```lua
-local server = Prediction.server({
+local server = Predictions.server({
     getState = getAuthoritativeState,
     publish = publishAuthoritativeState,
-    now = function()
-        return workspace:GetServerTimeNow()
-    end,
+    now = clock,
     replication = predictionSyncServer,
 })
+```
 
-local equipTool = server.register(EquipTool, {
-    acceptClient = function(player, payload)
-        return payload.characterId == getPlayerCharacterId(player)
-    end,
+Returns:
+
+| Function | Result |
+| --- | --- |
+| `server.register(definition, options?)` | Registers an action and returns a bound action. `options.acceptClient(actor, payload)` can authorize client requests. |
+| `server.receive(actor, envelope)` | Validates and processes an action envelope from a client. |
+
+Calling `dispatch(payload)` on a server-bound action performs a direct authoritative dispatch and returns whether it was accepted.
+
+## Charm Sync adapter
+
+### `Predictions.adapters.charmSync.client(config)`
+
+```lua
+local adapter = Predictions.adapters.charmSync.client({
+    runtime = client,
+    charmSync = CharmSync,
+    predictedSignals = { "tools", "abilities" },
 })
 
-ACTION_CHANNEL.onMessage(function(player, envelope)
-    server.receive(player, envelope)
-end)
+local regularUpdates = adapter.apply(payload)
 ```
 
-The same bound action can be dispatched directly by server code:
+`apply` reconciles predicted signals and returns the remaining Charm Sync updates.
+
+### `Predictions.adapters.charmSync.server(config)`
 
 ```lua
-equipTool.dispatch({
-    characterId = npcCharacterId,
-    toolId = swordToolId,
+local adapter = Predictions.adapters.charmSync.server({
+    charmSync = CharmSync,
+    send = sendReconciliationPayload,
 })
+
+adapter.start()
+adapter.destroy()
 ```
 
-## Sync delivery contract
+Pass this adapter to `Predictions.server` as `replication`. It must be started before the runtime receives client actions.
 
-The optional adapter is exposed by the main library and targets Charm Sync 0.4:
+## Exported types
 
-```lua
-local Prediction = require(ReplicatedStorage.Packages.Predictions)
-local PredictionCharmSync = Prediction.adapters.charmSync
-```
+The main module exports types for action definitions and envelopes, effects, client and server configuration, runtimes, and their callbacks. The Charm Sync adapter module also exports its config, update, payload, and adapter types.
 
-The Charm Sync adapter delivers authoritative updates and the cumulative processed sequence in one envelope:
-
-```lua
-{
-    charmUpdates = {
-        {
-            type = "patch",
-            data = updates,
-        },
-    },
-    processedSequence = 12,
-}
-```
-
-Do not create a separate acknowledgement channel. `processedSequence = 12` guarantees that the authoritative state delivered so far already reflects every accepted action through sequence `12`. The client applies the patch, removes acknowledged actions, replays the rest, and publishes once.
-
-## Effects
-
-Effects are connected to directly. They are not registered with runtimes.
-
-```lua
-ToolEquipped.connect(function(payload)
-    toolPresentation.update(payload.characterId, payload.toolId)
-end)
-```
-
-Reducers may emit them:
-
-```lua
-local function reduceEquipTool(state, payload)
-    local nextState = tryEquipTool(state, payload)
-
-    if nextState == nil then
-        return nil
-    end
-
-    ToolEquipped.emit(payload)
-    return nextState
-end
-```
-
-The runtime schedules each collected effect listener in an independent deferred task after an accepted real dispatch. A yielding or failing listener does not block dispatch or other listeners. Effects are discarded during reconciliation replay.
-
-Effects are never automatically sent over the network.
-
-## Minimal public surface
-
-```lua
-Prediction.defineAction(config)
-Prediction.defineEffect(config)
-
-Prediction.client(config)
-client.register(actionDefinition)
-client.reconcile(authoritativeState, processedSequence)
-client.getAuthoritativeState()
-client.getPredictedState()
-client.getPendingCount()
-clientAction.dispatch(payload)
-
-Prediction.server(config)
-server.register(actionDefinition, options?)
-server.receive(player, envelope)
-serverAction.dispatch(payload)
-
-effect.emit(payload)
-effect.connect(callback)
-connection.disconnect()
-
-Prediction.adapters.charmSync.client(config)
-clientSync.apply(payload)
-
-Prediction.adapters.charmSync.server(config)
-serverSync.start()
-serverSync.destroy()
-```
-
-Avoid adding public helpers until a concrete use case requires them.
+For practical examples, see [Actions](ACTIONS.md), [Runtimes](RUNTIMES.md), and [Charm Sync](CHARM_SYNC.md).
