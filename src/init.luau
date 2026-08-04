@@ -1,7 +1,6 @@
 --!strict
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local adapterMain = require(ReplicatedStorage.Packages.Predictions.charmSync.adapterMain)
+local adapterMain = require(script.charmSync.adapterMain)
 local Action = require(script.action)
 local Client = require(script.client)
 local Effect = require(script.effect)
