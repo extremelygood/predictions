@@ -1,5 +1,7 @@
 --!strict
 
+local LogService = game:GetService("LogService")
+
 export type TestCase = {
 	name: string,
 	run: () -> (),
@@ -71,6 +73,27 @@ local function expectError(callback: () -> (), messageFragment: string?)
 	end
 end
 
+local function expectWarning(callback: () -> (), messageFragment: string)
+	local matched = false
+	local connection = LogService.MessageOut:Connect(function(message, messageType)
+		if messageType == Enum.MessageType.MessageWarning
+			and string.find(message, messageFragment, 1, true) ~= nil
+		then
+			matched = true
+		end
+	end)
+
+	local succeeded, failure = pcall(callback)
+	connection:Disconnect()
+
+	if not succeeded then
+		error(failure, 2)
+	end
+	if not matched then
+		error(`Expected warning containing {formatValue(messageFragment)}`, 2)
+	end
+end
+
 local function cloneDeep(value: any, seen: { [any]: any }?): any
 	if type(value) ~= "table" then
 		return value
@@ -118,5 +141,6 @@ return {
 	expectDeepEqual = expectDeepEqual,
 	expectEqual = expectEqual,
 	expectError = expectError,
+	expectWarning = expectWarning,
 	run = run,
 }

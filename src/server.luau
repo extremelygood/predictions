@@ -145,7 +145,15 @@ local function createServer<State, Actor>(config: Types.ServerConfig<State, Acto
 		end
 
 		local expectedSequence = (processedSequences[actor] or 0) + 1
-		if sequence ~= expectedSequence then
+		if sequence < expectedSequence then
+			warn(
+				`[Predictions] Received stale or duplicate action sequence {sequence} from {tostring(actor)}; expected {expectedSequence}. The action was ignored.`
+			)
+			return
+		elseif sequence > expectedSequence then
+			warn(
+				`[Predictions] Received out-of-order action sequence {sequence} from {tostring(actor)}; expected {expectedSequence}. The action was ignored. Client action transport must be reliable and ordered.`
+			)
 			return
 		end
 
@@ -158,6 +166,9 @@ local function createServer<State, Actor>(config: Types.ServerConfig<State, Acto
 
 		local registered = registry[actionId]
 		if registered == nil then
+			warn(
+				`[Predictions] Received unregistered action "{actionId}" from {tostring(actor)} at sequence {sequence}. The action was rejected.`
+			)
 			commitRejection(actor, sequence)
 			return
 		end
