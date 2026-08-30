@@ -8,3 +8,4 @@
 wally.lock
 .vscode
 sourcemap.json
+.worktrees/
