@@ -56,6 +56,7 @@ local function createClient<State>(config: Types.ClientConfig<State>): Types.Cli
 	local authoritativeState = config.initialState
 	local predictedState = config.initialState
 	local nextSequence: Types.Sequence = 1
+	local lastProcessedSequence: Types.Sequence = 0
 	local pendingActions: { Types.PendingAction<State> } = {}
 	local registry: Types.ClientActionRegistry<State> = {}
 
@@ -112,6 +113,16 @@ local function createClient<State>(config: Types.ClientConfig<State>): Types.Cli
 			isFiniteNumber(processedSequence) and processedSequence >= 0 and processedSequence % 1 == 0,
 			"[Predictions] Processed sequence must be a non-negative integer"
 		)
+		assert(
+			processedSequence >= lastProcessedSequence,
+			"[Predictions] Processed sequence must not move backwards"
+		)
+		assert(
+			processedSequence < nextSequence,
+			`[Predictions] Processed sequence {processedSequence} exceeds highest dispatched sequence {nextSequence - 1}`
+		)
+
+		lastProcessedSequence = processedSequence
 
 		authoritativeState = nextAuthoritativeState
 

@@ -235,6 +235,8 @@ local cases: { TestRunner.TestCase } = {
 		name = "regressing and malformed payloads fail before changing state",
 		run = function()
 			local client = createClientEndpoint(defineCounterAction())
+			TestRunner.expectEqual(client.action.dispatch({ amount = 1 }), true)
+			TestRunner.expectEqual(client.action.dispatch({ amount = 1 }), true)
 			client.sync.apply({
 				charmUpdates = {
 					{ type = "patch", data = { counter = 3 } },

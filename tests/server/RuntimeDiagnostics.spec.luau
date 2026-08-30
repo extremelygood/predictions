@@ -13,6 +13,12 @@ type Payload = {
 	amount: number,
 }
 
+type Client = {
+	runtime: any,
+	action: any,
+	envelopes: { any },
+}
+
 local ACTOR = "actor"
 
 local function defineCounterAction()
@@ -57,6 +63,29 @@ local function createServer()
 		getState = function(): State
 			return state
 		end,
+	}
+end
+
+local function createClientRuntime(): Client
+	local envelopes: { any } = {}
+	local runtime = Prediction.client({
+		initialState = {
+			counter = 0,
+		},
+		publish = function(_state: State)
+		end,
+		send = function(envelope: any)
+			table.insert(envelopes, envelope)
+		end,
+		now = function(): number
+			return 100
+		end,
+	})
+
+	return {
+		runtime = runtime,
+		action = runtime.register(defineCounterAction()),
+		envelopes = envelopes,
 	}
 end
 
@@ -115,6 +144,37 @@ local cases: { TestRunner.TestCase } = {
 				actionTime = 100,
 			})
 			TestRunner.expectEqual(server.getState().counter, 1)
+		end,
+	},
+	{
+		name = "client rejects a processed sequence above locally dispatched actions",
+		run = function()
+			local client = createClientRuntime()
+			TestRunner.expectEqual(client.action.dispatch({ amount = 1 }), true)
+
+			TestRunner.expectError(function()
+				client.runtime.reconcile({ counter = 99 }, 2)
+			end, "exceeds highest dispatched sequence 1")
+
+			TestRunner.expectEqual(client.runtime.getAuthoritativeState().counter, 0)
+			TestRunner.expectEqual(client.runtime.getPredictedState().counter, 1)
+			TestRunner.expectEqual(client.runtime.getPendingCount(), 1)
+		end,
+	},
+	{
+		name = "client rejects a regressing processed sequence",
+		run = function()
+			local client = createClientRuntime()
+			TestRunner.expectEqual(client.action.dispatch({ amount = 1 }), true)
+			client.runtime.reconcile({ counter = 1 }, 1)
+
+			TestRunner.expectError(function()
+				client.runtime.reconcile({ counter = 99 }, 0)
+			end, "must not move backwards")
+
+			TestRunner.expectEqual(client.runtime.getAuthoritativeState().counter, 1)
+			TestRunner.expectEqual(client.runtime.getPredictedState().counter, 1)
+			TestRunner.expectEqual(client.runtime.getPendingCount(), 0)
 		end,
 	},
 }
