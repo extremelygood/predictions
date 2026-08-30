@@ -48,7 +48,7 @@ The low-level reconciliation call is:
 client.reconcile(authoritativeState, processedSequence)
 ```
 
-It replaces the authoritative state, removes pending actions through the processed sequence, replays the remaining actions, and publishes once. When using Charm Sync, call the adapter's `apply` method instead; it builds the authoritative state and invokes reconciliation at the correct time.
+It replaces the authoritative state, removes pending actions through the processed sequence, replays the remaining actions, and publishes once. `processedSequence` must be a non-negative integer, must never move backwards from a previously applied watermark, and must never exceed the highest sequence dispatched by that client runtime. These are programmer/transport invariant failures; the runtime raises an assertion before reconciliation mutates core client state. When using Charm Sync, call the adapter's `apply` method instead; it builds the authoritative state and invokes reconciliation at the correct time.
 
 ## Server
 
@@ -96,7 +96,7 @@ end)
 
 `receive` validates action IDs, payloads, timestamps, authorization, and sequence order. A handled request advances the player's cumulative processed sequence even when it is rejected, allowing the client to remove the corresponding prediction.
 
-The transport must deliver client action envelopes reliably and in order. Stale messages and sequence gaps are ignored.
+The transport must deliver client action envelopes reliably and in order. Stale/duplicate messages and sequence gaps are ignored and emit a warning because either case violates the expected transport sequence. An unregistered action id is rejected normally so its sequence is acknowledged, but also emits a warning because client/server action registration is inconsistent. Validator, authorization, and reducer rejections remain normal control flow and do not emit these warnings.
 
 Call `predictionSync.destroy()` when the adapter should disconnect from Charm Sync. Starting and destroying it more than once is safe.
 
