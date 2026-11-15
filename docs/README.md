@@ -17,18 +17,19 @@ client dispatch
     -> predict and publish locally
     -> send action envelope
     -> validate and reduce on server
-    -> sync authoritative state and processed sequence
+    -> on the next network tick, sync authoritative state and processed sequence
     -> reconcile and replay remaining actions on client
 ```
 
-Reducers return complete state values. The runtime passes those values to your `publish` callback, which updates the stores used by the rest of the game.
+Reducers return complete state values for the state they are given: the whole predicted state on the client, and on the server the state `getState` returns for the action's payload. The runtime passes those values to your `publish` callback, which updates the stores used by the rest of the game.
 
 ## Requirements
 
 - A shared Luau state shape on the client and server.
 - A reliable, ordered client-to-server transport for action envelopes.
 - Charm Sync 0.4 for authoritative state replication.
-- Top-level state keys that match the names of the predicted Charm signals.
+- Predicted signals that are top-level keys of the client's prediction state. Each one is mapped to the Charm Sync key it is synced under.
+- A network tick: the server calls the adapter's `flush` once a frame.
 
 Predictions does not create remotes, install Charm Sync, or manage Charm Sync subscriptions. Those stay in game code.
 

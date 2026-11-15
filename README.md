@@ -10,7 +10,7 @@ With Wally, add the package under the `Predictions` alias:
 
 ```toml
 [dependencies]
-Predictions = "extremelygood/predictions@0.1.0"
+Predictions = "extremelygood/predictions@0.2.0"
 ```
 
 Mount it at `ReplicatedStorage.Packages.Predictions`. Predictions does not include Charm or Charm Sync, so games using the adapter need to provide their own Charm Sync 0.4 installation.

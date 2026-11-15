@@ -1,6 +1,6 @@
 # Server Setup
 
-The server owns both authoritative values. It also gives the Predictions adapter exclusive ownership of `CharmSync.server.connect`, allowing a counter patch and its processed-sequence watermark to be sent together.
+The server owns both authoritative values. It also gives the Predictions adapter exclusive ownership of `CharmSync.server.connect` and of every flush, so a counter patch and its processed-sequence watermark are sent together on the network tick.
 
 ```lua
 --!strict
@@ -8,6 +8,7 @@ The server owns both authoritative values. It also gives the Predictions adapter
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local CharmSync = require(ReplicatedStorage.Packages.CharmSync)
 local Prediction = require(ReplicatedStorage.Packages.Predictions)
@@ -41,14 +42,15 @@ local predictionSync = Prediction.adapters.charmSync.server({
 predictionSync.start()
 
 local server = Prediction.server({
-    getState = function(): State
+    -- The demo's actions all work on the whole state, so getState ignores the payload.
+    getState = function(_payload: unknown): State
         return {
             counter = CounterStore.get(),
         }
     end,
 
-    publish = function(state: State)
-        CounterStore.set(state.counter)
+    publish = function(_before: State, after: State)
+        CounterStore.set(after.counter)
     end,
 
     now = function(): number
@@ -79,15 +81,23 @@ end)
 
 Players.PlayerRemoving:Connect(function(player: Player)
     CharmSync.server.removeClient(player)
+    server.removeActor(player)
+end)
+
+-- The network tick: one Charm Sync diff a frame, each acknowledgement with it.
+RunService.Heartbeat:Connect(function()
+    predictionSync.flush()
 end)
 
 -- Example of an ordinary authoritative update. The client does not predict it.
 ServerStatusStore.set("Round running")
 ```
 
-Do not install another `CharmSync.server.connect` callback while `predictionSync` is started. The adapter owns that connection, calls `flush` when processing an action, and sends through its configured `send` callback.
+Do not install another `CharmSync.server.connect` callback while `predictionSync` is started, and never call `CharmSync.server.flush` yourself. The adapter owns that connection, stops Charm Sync's own interval, and sends through its configured `send` callback only when `predictionSync.flush()` runs. Call it once a frame, outside any `Charm.batch`, where `CounterStore.get` returns the current counter. A handled action's acknowledgement waits for that tick, so it always arrives with the counter that holds the action.
 
-The originating player must already be subscribed to `counter` before sending actions. Otherwise Charm Sync cannot produce the authoritative counter patch that the processed sequence is meant to accompany.
+Call `server.removeActor(player)` when a player leaves, so his sequence and any waiting acknowledgement are forgotten.
+
+The originating player must already be subscribed to `counter` before sending actions. Otherwise Charm Sync cannot produce the authoritative counter patch that the processed sequence is meant to accompany, and the acknowledgement goes alone.
 
 Direct server actions are also available from the same object returned by `register`:
 
@@ -95,4 +105,4 @@ Direct server actions are also available from the same object returned by `regis
 adjustCounter.dispatch({ amount = 1 })
 ```
 
-Direct dispatch runs the shared reducer authoritatively without calling `acceptClient` or advancing a client sequence. Registering the same action ID twice is an error.
+Direct dispatch runs the shared reducer authoritatively on the state `getState` returns and publishes it, without calling `acceptClient` or advancing a client sequence. Registering the same action ID twice is an error.

@@ -39,27 +39,35 @@ local function createServer()
 	local state: State = {
 		counter = 0,
 	}
+	local acknowledgements: { number } = {}
+	local statePayloads: { any } = {}
 	local runtime = Prediction.server({
-		getState = function(): State
+		getState = function(payload: unknown): State
+			table.insert(statePayloads, payload)
 			return state
 		end,
-		publish = function(nextState: State)
-			state = nextState
+		publish = function(before: State, after: State)
+			assert(before == state, "publish was not given the table getState returned")
+			state = after
 		end,
 		now = function(): number
 			return 200
 		end,
 		replication = {
-			_commit = function(_actor: string, _sequence: number, apply: () -> ())
-				apply()
+			_acknowledge = function(_actor: string, sequence: number)
+				table.insert(acknowledgements, sequence)
 			end,
+			_forget = function(_actor: string) end,
 		},
 	})
 
-	runtime.register(defineCounterAction())
+	local action = runtime.register(defineCounterAction())
 
 	return {
 		runtime = runtime,
+		action = action,
+		acknowledgements = acknowledgements,
+		statePayloads = statePayloads,
 		getState = function(): State
 			return state
 		end,
@@ -121,6 +129,7 @@ local cases: { TestRunner.TestCase } = {
 					actionTime = 100,
 				})
 			end, "stale or duplicate action sequence 1")
+			TestRunner.expectDeepEqual(server.acknowledgements, { 1 })
 		end,
 	},
 	{
@@ -144,6 +153,39 @@ local cases: { TestRunner.TestCase } = {
 				actionTime = 100,
 			})
 			TestRunner.expectEqual(server.getState().counter, 1)
+			TestRunner.expectDeepEqual(server.acknowledgements, { 1, 2 })
+		end,
+	},
+	{
+		name = "server works an action out on the state getState gives for its payload",
+		run = function()
+			local server = createServer()
+			local payload = { amount = 2 }
+
+			server.runtime.receive(ACTOR, {
+				actionId = "AdjustCounter",
+				payload = payload,
+				sequence = 1,
+				actionTime = 100,
+			})
+			TestRunner.expectEqual(server.statePayloads[1], payload)
+			TestRunner.expectEqual(server.getState().counter, 2)
+
+			-- A direct dispatch goes the same way and acknowledges nothing.
+			TestRunner.expectEqual(server.action.dispatch({ amount = 3 }), true)
+			TestRunner.expectEqual(#server.statePayloads, 2)
+			TestRunner.expectEqual(server.getState().counter, 5)
+			TestRunner.expectDeepEqual(server.acknowledgements, { 1 })
+
+			-- A payload that fails validate never reaches getState, and its sequence is still acknowledged.
+			server.runtime.receive(ACTOR, {
+				actionId = "AdjustCounter",
+				payload = { amount = "many" },
+				sequence = 2,
+				actionTime = 100,
+			} :: any)
+			TestRunner.expectEqual(#server.statePayloads, 2)
+			TestRunner.expectDeepEqual(server.acknowledgements, { 1, 2 })
 		end,
 	},
 	{

@@ -46,7 +46,8 @@ local client = Prediction.client({
 local predictionSync = Prediction.adapters.charmSync.client({
     runtime = client,
     charmSync = CharmSync,
-    predictedSignals = { "counter" },
+    -- State key "counter" is synced under the Charm Sync key "counter".
+    predictedSignals = { counter = "counter" },
 })
 
 -- The adapter already registered "counter". Register only regular signals here.

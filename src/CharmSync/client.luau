@@ -95,18 +95,19 @@ local function createClient<State>(config: Types.CharmSyncClientConfig<State>): 
 		type(config.charmSync.client.addSignals) == "function" and type(config.charmSync.client.patch) == "function",
 		"[Predictions.CharmSync] charmSync.client is missing required Charm Sync 0.4 functions"
 	)
-	assert(type(config.predictedSignals) == "table", "[Predictions.CharmSync] predictedSignals must be an array")
-	assertDenseArray(config.predictedSignals :: any, "predictedSignals")
-	assert(#config.predictedSignals > 0, "[Predictions.CharmSync] predictedSignals must not be empty")
+	assert(type(config.predictedSignals) == "table", "[Predictions.CharmSync] predictedSignals must be a map")
+	assert(next(config.predictedSignals) ~= nil, "[Predictions.CharmSync] predictedSignals must not be empty")
 
 	local runtime = config.runtime
 	local charmClient = config.charmSync.client
 	local authoritativeState: any = runtime.getAuthoritativeState()
 	assert(type(authoritativeState) == "table", "[Predictions.CharmSync] Prediction state must be a top-level table")
 
+	-- Charm Sync keys of the predicted signals.
 	local predictedSignalSet: { [string]: boolean } = {}
 	local setters: { [string]: Types.CharmSyncSetter } = {}
 
+	-- The setter Charm Sync calls for a predicted signal: it writes state key `key`.
 	local function createSetter(key: string): Types.CharmSyncSetter
 		return function(valueOrUpdater: any): any
 			local previousValue = authoritativeState[key]
@@ -120,18 +121,25 @@ local function createClient<State>(config: Types.CharmSyncClientConfig<State>): 
 		end
 	end
 
-	for _, key in config.predictedSignals do
+	for stateKey, syncKey in config.predictedSignals do
 		assert(
-			type(key) == "string" and key ~= "",
-			"[Predictions.CharmSync] Predicted signal names must be non-empty strings"
+			type(stateKey) == "string" and stateKey ~= "",
+			"[Predictions.CharmSync] Predicted state keys must be non-empty strings"
 		)
-		assert(not predictedSignalSet[key], `[Predictions.CharmSync] Predicted signal "{key}" is duplicated`)
 		assert(
-			rawget(authoritativeState, key) ~= nil,
-			`[Predictions.CharmSync] Predicted signal "{key}" is missing from prediction state`
+			type(syncKey) == "string" and syncKey ~= "",
+			`[Predictions.CharmSync] Charm Sync key for predicted state "{stateKey}" must be a non-empty string`
 		)
-		predictedSignalSet[key] = true
-		setters[key] = createSetter(key)
+		assert(
+			not predictedSignalSet[syncKey],
+			`[Predictions.CharmSync] Charm Sync key "{syncKey}" is predicted more than once`
+		)
+		assert(
+			rawget(authoritativeState, stateKey) ~= nil,
+			`[Predictions.CharmSync] Predicted state "{stateKey}" is missing from prediction state`
+		)
+		predictedSignalSet[syncKey] = true
+		setters[syncKey] = createSetter(stateKey)
 	end
 
 	charmClient.addSignals(setters)

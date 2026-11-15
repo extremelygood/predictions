@@ -2,23 +2,6 @@
 
 local Types = require(script.Parent.Parent["_charm-sync-adapter-types"])
 
-type PendingCommit = {
-	sequence: number,
-}
-
-local function traceback(message: any): string
-	return debug.traceback(tostring(message), 2)
-end
-
-local function isPositiveInteger(value: any): boolean
-	return type(value) == "number"
-		and value == value
-		and value > -math.huge
-		and value < math.huge
-		and value >= 1
-		and value % 1 == 0
-end
-
 local function createServer<Actor>(config: Types.CharmSyncServerConfig<Actor>): Types.CharmSyncServer<Actor>
 	assert(type(config) == "table", "[Predictions.CharmSync] Server config must be a table")
 	assert(type(config.charmSync) == "table", "[Predictions.CharmSync] Server config must define charmSync")
@@ -34,21 +17,20 @@ local function createServer<Actor>(config: Types.CharmSyncServerConfig<Actor>): 
 	local charmServer = config.charmSync.server
 	local send = config.send
 	local started = false
-	local pendingCommits: { [any]: PendingCommit } = {}
+	-- Per actor, the highest handled sequence that has not been sent to him yet.
+	local acknowledged: { [any]: number } = {}
 
+	-- Charm Sync calls this only inside `flush` below.
 	local function handleSync(actor: Actor, updates: Types.CharmSyncUpdates)
 		if not started then
 			return
 		end
 
-		local pending = pendingCommits[actor]
-		if pending ~= nil then
-			pendingCommits[actor] = nil
-		end
-
+		local sequence = acknowledged[actor]
+		acknowledged[actor] = nil
 		send(actor, {
 			charmUpdates = updates,
-			processedSequence = if pending == nil then nil else pending.sequence,
+			processedSequence = sequence,
 		})
 	end
 
@@ -57,8 +39,10 @@ local function createServer<Actor>(config: Types.CharmSyncServerConfig<Actor>): 
 			return
 		end
 
-		charmServer.connect(handleSync)
 		started = true
+		-- Disconnecting stops only Charm Sync's own interval and keeps the callback, so `flush` is the only sync.
+		charmServer.connect(handleSync)
+		charmServer.disconnect()
 	end
 
 	local function destroy()
@@ -67,54 +51,43 @@ local function createServer<Actor>(config: Types.CharmSyncServerConfig<Actor>): 
 		end
 
 		started = false
-		table.clear(pendingCommits)
-		charmServer.disconnect()
+		acknowledged = {}
 	end
 
-	local function commit(actor: Actor, processedSequence: number, apply: () -> ())
-		assert(started, "[Predictions.CharmSync] Server adapter must be started before processing actions")
-		assert(actor ~= nil, "[Predictions.CharmSync] Commit actor must not be nil")
-		assert(
-			isPositiveInteger(processedSequence),
-			"[Predictions.CharmSync] Commit sequence must be a positive integer"
-		)
-		assert(type(apply) == "function", "[Predictions.CharmSync] Commit apply callback must be a function")
-		assert(pendingCommits[actor] == nil, "[Predictions.CharmSync] Overlapping commits for one actor are not supported")
-
-		local pending: PendingCommit = {
-			sequence = processedSequence,
-		}
-		pendingCommits[actor] = pending
-
-		local applySucceeded, applyFailure = (xpcall :: any)(apply, traceback)
-		if not applySucceeded then
-			if pendingCommits[actor] == pending then
-				pendingCommits[actor] = nil
-			end
-			error(applyFailure, 0)
+	local function flush()
+		if not started then
+			return
 		end
 
-		local flushSucceeded, flushFailure = (xpcall :: any)(charmServer.flush, traceback)
-		if not flushSucceeded then
-			if pendingCommits[actor] == pending then
-				pendingCommits[actor] = nil
-			end
-			error(flushFailure, 0)
-		end
+		charmServer.flush()
 
-		if pendingCommits[actor] == pending then
-			pendingCommits[actor] = nil
-			send(actor, {
+		-- The acknowledgements no payload carried go alone. Each send runs on its own, as Charm Sync's do, so one
+		-- that fails keeps nothing from the other actors.
+		local rest = acknowledged
+		acknowledged = {}
+		for actor, sequence in rest do
+			task.spawn(send, actor, {
 				charmUpdates = {},
-				processedSequence = processedSequence,
+				processedSequence = sequence,
 			})
 		end
 	end
 
+	local function acknowledge(actor: Actor, sequence: number)
+		assert(started, "[Predictions.CharmSync] Server adapter must be started before processing actions")
+		acknowledged[actor] = sequence
+	end
+
+	local function forget(actor: Actor)
+		acknowledged[actor] = nil
+	end
+
 	return {
-		_commit = commit,
+		_acknowledge = acknowledge,
+		_forget = forget,
 		start = start,
 		destroy = destroy,
+		flush = flush,
 	}
 end
 

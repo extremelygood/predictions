@@ -104,16 +104,21 @@ export type ServerActionRegistry<State, Actor> = {
 	[string]: RegisteredServerAction<State, Actor>,
 }
 
--- This is the private bridge used by the server runtime. The adapter owns the
--- batching and flush so a processed sequence can never overtake the state patch
--- produced by `apply`.
+-- This is the private bridge between the server runtime and its replication
+-- adapter. The runtime reports every handled sequence; the adapter sends it with
+-- the next sync, after the state it covers has been written.
 export type ServerReplication<Actor> = {
-	_commit: (actor: Actor, processedSequence: Sequence, apply: () -> ()) -> (),
+	-- `actor`'s actions through `sequence` are handled (applied or rejected): tell him with the next sync.
+	_acknowledge: (actor: Actor, sequence: Sequence) -> (),
+	-- `actor` is gone: drop what is kept for him.
+	_forget: (actor: Actor) -> (),
 }
 
 export type ServerConfig<State, Actor> = {
-	getState: () -> State,
-	publish: Publisher<State>,
+	-- The state an action is worked out on. `payload` has passed the action's `validate`.
+	getState: (payload: unknown) -> State,
+	-- Writes the reducer's result. `before` is the very table `getState` returned for this action.
+	publish: (before: State, after: State) -> (),
 	now: Clock,
 	replication: ServerReplication<Actor>,
 }
@@ -124,6 +129,8 @@ export type ServerRuntime<State, Actor> = {
 		options: ServerActionOptions<Actor, Payload>?
 	) -> BoundAction<Payload>,
 	receive: (actor: Actor, envelope: unknown) -> (),
+	-- The actor is gone (a player left): forgets his sequence and any acknowledgement waiting for him.
+	removeActor: (actor: Actor) -> (),
 }
 
 return {}

@@ -53,6 +53,10 @@ Return `nil` from `reduce` to reject an action. Returning the original state acc
 
 Reducers should be deterministic, must not mutate their input state, and must not yield. Store updates and networking belong in the runtime callbacks rather than in the reducer.
 
+## The state a reducer is given
+
+On the client a reducer is given the whole predicted state. On the server it is given the state the server runtime's `getState(payload)` returns for its payload, which may be only the part of the state the action belongs to, such as one character's. A reducer must read and write nothing outside the state it is given: no store reads, no globals. That way the client and server work the same action out on the same values. A game whose actions all work on the whole state returns everything from `getState`; see [Runtimes](RUNTIMES.md#the-state-an-action-is-worked-out-on).
+
 ## Dispatch on the client
 
 ```lua
@@ -89,4 +93,4 @@ local accepted = equipTool.dispatch({
 })
 ```
 
-A direct server dispatch validates and reduces normally, but does not call `acceptClient` and does not affect a client's sequence number.
+A direct server dispatch validates, reduces on the state `getState` returns for its payload, and publishes like a client action, but does not call `acceptClient` and does not affect a client's sequence number.

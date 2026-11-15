@@ -10,11 +10,14 @@ type Delivery = {
 	updates: { Update },
 }
 
+-- Behaves like Charm Sync 0.4 where the adapter relies on it: `disconnect` stops only the interval and keeps the
+-- callback, and `flush` calls the callback at most once per client with that client's updates in order.
 local function new()
 	local setters: { [string]: (any) -> any } = {}
 	local patchCalls: { { Update } } = {}
 	local deliveries: { Delivery } = {}
 	local syncCallback: ((any, { Update }) -> ())? = nil
+	local intervalRunning = false
 	local connectCount = 0
 	local disconnectCount = 0
 	local flushCount = 0
@@ -41,15 +44,18 @@ local function new()
 			connect = function(callback: (any, { Update }) -> ())
 				connectCount += 1
 				syncCallback = callback
+				intervalRunning = true
 			end,
 			disconnect = function()
 				disconnectCount += 1
-				syncCallback = nil
+				intervalRunning = false
 			end,
 			flush = function()
 				flushCount += 1
 				local callback = syncCallback
-				assert(callback ~= nil, "Fake Charm Sync server is not connected")
+				if callback == nil then
+					return
+				end
 
 				local queued = deliveries
 				deliveries = {}
@@ -63,9 +69,16 @@ local function new()
 	return {
 		library = library,
 		queueDelivery = function(actor: any, updates: { Update })
+			for _, delivery in deliveries do
+				if delivery.actor == actor then
+					table.move(updates, 1, #updates, #delivery.updates + 1, delivery.updates)
+					return
+				end
+			end
+
 			table.insert(deliveries, {
 				actor = actor,
-				updates = updates,
+				updates = table.clone(updates),
 			})
 		end,
 		getPatchCalls = function(): { { Update } }
@@ -79,6 +92,9 @@ local function new()
 		end,
 		getFlushCount = function(): number
 			return flushCount
+		end,
+		isIntervalRunning = function(): boolean
+			return intervalRunning
 		end,
 	}
 end

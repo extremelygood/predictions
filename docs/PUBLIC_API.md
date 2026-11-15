@@ -65,21 +65,29 @@ A bound action exposes `dispatch(payload) -> boolean`.
 
 ```lua
 local server = Predictions.server({
-    getState = getAuthoritativeState,
-    publish = publishAuthoritativeState,
+    getState = getActionState,
+    publish = publishActionResult,
     now = clock,
     replication = predictionSyncServer,
 })
 ```
+
+| Field | Meaning |
+| --- | --- |
+| `getState(payload)` | Returns the state an action is worked out on. Called with a payload that has passed the action's `validate`. The reducer must read and write nothing outside this state. |
+| `publish(before, after)` | Writes the reducer's result. `before` is the very table `getState` returned for this action. |
+| `now()` | Returns a finite action timestamp for direct server dispatches. |
+| `replication` | The started Charm Sync server adapter. |
 
 Returns:
 
 | Function | Result |
 | --- | --- |
 | `server.register(definition, options?)` | Registers an action and returns a bound action. `options.acceptClient(actor, payload)` can authorize client requests. |
-| `server.receive(actor, envelope)` | Validates and processes an action envelope from a client. |
+| `server.receive(actor, envelope)` | Validates and processes an action envelope from a client. Every envelope with the expected sequence is acknowledged with the next tick, whether it is applied or rejected. |
+| `server.removeActor(actor)` | Forgets a departed actor's sequence and any acknowledgement waiting for him. Call it when a player leaves. |
 
-Calling `dispatch(payload)` on a server-bound action performs a direct authoritative dispatch and returns whether it was accepted.
+Calling `dispatch(payload)` on a server-bound action performs a direct authoritative dispatch through `getState` and `publish` and returns whether it was accepted.
 
 ## Charm Sync adapter
 
@@ -89,13 +97,13 @@ Calling `dispatch(payload)` on a server-bound action performs a direct authorita
 local adapter = Predictions.adapters.charmSync.client({
     runtime = client,
     charmSync = CharmSync,
-    predictedSignals = { "tools", "abilities" },
+    predictedSignals = { tools = "tools", abilities = "abilities" },
 })
 
 local regularUpdates = adapter.apply(payload)
 ```
 
-`apply` reconciles predicted signals and returns the remaining Charm Sync updates.
+`predictedSignals` maps each predicted top-level state key to the Charm Sync key its signal is synced under. `apply` reconciles predicted signals and returns the remaining Charm Sync updates.
 
 ### `Predictions.adapters.charmSync.server(config)`
 
@@ -106,8 +114,15 @@ local adapter = Predictions.adapters.charmSync.server({
 })
 
 adapter.start()
+adapter.flush()
 adapter.destroy()
 ```
+
+| Function | Result |
+| --- | --- |
+| `adapter.start()` | Connects to Charm Sync and stops its automatic interval. Idempotent. |
+| `adapter.flush()` | The network tick: one Charm Sync diff, each player's acknowledgement sent with his updates or alone. Call it once a frame, outside any `Charm.batch`, when the synced getters return current state. Never call `CharmSync.server.flush` yourself: a flush that runs before the game's state is current (while an action is still being handled, for example) would send an acknowledgement ahead of the state that holds it. |
+| `adapter.destroy()` | Stops the adapter and drops waiting acknowledgements. Idempotent; `start()` restarts it. |
 
 Pass this adapter to `Predictions.server` as `replication`. It must be started before the runtime receives client actions.
 

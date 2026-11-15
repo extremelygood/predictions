@@ -49,7 +49,8 @@ export type CharmSyncServerLibrary<Actor> = {
 export type CharmSyncClientConfig<State> = {
 	runtime: CoreTypes.ClientRuntime<State>,
 	charmSync: CharmSyncClientLibrary,
-	predictedSignals: { string },
+	-- Maps each predicted top-level state key to the Charm Sync key its signal is synced under.
+	predictedSignals: { [string]: string },
 }
 
 export type CharmSyncClient = {
@@ -64,6 +65,9 @@ export type CharmSyncServerConfig<Actor> = {
 export type CharmSyncServer<Actor> = CoreTypes.ServerReplication<Actor> & {
 	start: () -> (),
 	destroy: () -> (),
+	-- The network tick. The game calls it (once a frame), outside any Charm.batch, when its synced getters return
+	-- current state. One charm-sync diff; each client's acknowledgement goes with his payload, or alone.
+	flush: () -> (),
 }
 
 export type PredictionCharmSyncLibrary = {

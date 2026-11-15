@@ -69,14 +69,39 @@ local function createServer<State, Actor>(config: Types.ServerConfig<State, Acto
 	assert(type(config.publish) == "function", "[Predictions] Server config must define publish")
 	assert(type(config.now) == "function", "[Predictions] Server config must define now")
 	assert(type(config.replication) == "table", "[Predictions] Server config must define replication")
-	assert(type(config.replication._commit) == "function", "[Predictions] Server replication must define _commit")
+	assert(
+		type(config.replication._acknowledge) == "function",
+		"[Predictions] Server replication must define _acknowledge"
+	)
+	assert(type(config.replication._forget) == "function", "[Predictions] Server replication must define _forget")
 
 	local getState = config.getState
 	local publish = config.publish
 	local now = config.now
-	local commit = config.replication._commit
+	local acknowledge = config.replication._acknowledge
+	local forget = config.replication._forget
 	local registry: Types.ServerActionRegistry<State, Actor> = {}
 	local processedSequences: { [any]: Types.Sequence } = {}
+
+	-- Works `payload` out on the state `getState` gives for it and publishes the result.
+	-- `payload` has passed the action's `validate`.
+	local function reduceAndPublish(
+		definition: Types.ActionDefinition<State, any>,
+		payload: any,
+		actionTime: Types.Timestamp
+	): boolean
+		local before = getState(payload)
+		local accepted, after, effects = runReducer(definition, before, payload, {
+			actionTime = actionTime,
+		})
+		if not accepted then
+			return false
+		end
+
+		publish(before, after :: State)
+		EffectScope.deliver(effects)
+		return true
+	end
 
 	local function register<Payload>(
 		definition: Types.ActionDefinition<State, Payload>,
@@ -109,28 +134,12 @@ local function createServer<State, Actor>(config: Types.ServerConfig<State, Acto
 				`[Predictions] Clock returned an invalid timestamp for action "{definition.id}"`
 			)
 
-			local state = getState()
-			local accepted, nextState, effects = runReducer(definition, state, payload, {
-				actionTime = actionTime,
-			})
-			if not accepted then
-				return false
-			end
-
-			publish(nextState :: State)
-			EffectScope.deliver(effects)
-			return true
+			return reduceAndPublish(definition :: Types.ActionDefinition<State, any>, payload, actionTime)
 		end
 
 		return {
 			dispatch = dispatch,
 		}
-	end
-
-	local function commitRejection(actor: Actor, sequence: Types.Sequence)
-		commit(actor, sequence, function()
-			processedSequences[actor] = sequence
-		end)
 	end
 
 	local function receive(actor: Actor, envelope: unknown)
@@ -157,10 +166,15 @@ local function createServer<State, Actor>(config: Types.ServerConfig<State, Acto
 			return
 		end
 
+		-- The expected sequence is handled from here on, whatever happens to the action: a rejection, a
+		-- failing reducer or a throwing `publish` all leave it acknowledged. The acknowledgement only
+		-- leaves with the next sync, after everything below has run.
+		processedSequences[actor] = sequence
+		acknowledge(actor, sequence)
+
 		local actionId = rawEnvelope.actionId
 		local actionTime = rawEnvelope.actionTime
 		if type(actionId) ~= "string" or actionId == "" or not isFiniteNumber(actionTime) then
-			commitRejection(actor, sequence)
 			return
 		end
 
@@ -169,40 +183,30 @@ local function createServer<State, Actor>(config: Types.ServerConfig<State, Acto
 			warn(
 				`[Predictions] Received unregistered action "{actionId}" from {tostring(actor)} at sequence {sequence}. The action was rejected.`
 			)
-			commitRejection(actor, sequence)
 			return
 		end
 
 		local payload = rawEnvelope.payload
 		if not validatePayload(registered.definition, payload) then
-			commitRejection(actor, sequence)
 			return
 		end
 
 		if registered.acceptClient ~= nil and not authorize(actionId, registered.acceptClient, actor, payload) then
-			commitRejection(actor, sequence)
 			return
 		end
 
-		local state = getState()
-		local accepted, nextState, effects = runReducer(registered.definition, state, payload, {
-			actionTime = actionTime,
-		})
-		if not accepted then
-			commitRejection(actor, sequence)
-			return
-		end
+		reduceAndPublish(registered.definition, payload, actionTime)
+	end
 
-		commit(actor, sequence, function()
-			publish(nextState :: State)
-			processedSequences[actor] = sequence
-			EffectScope.deliver(effects)
-		end)
+	local function removeActor(actor: Actor)
+		processedSequences[actor] = nil
+		forget(actor)
 	end
 
 	return {
 		register = register,
 		receive = receive,
+		removeActor = removeActor,
 	}
 end
 

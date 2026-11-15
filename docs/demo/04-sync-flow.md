@@ -35,9 +35,9 @@ At this point:
 
 ## 2. Authoritative processing
 
-The server receives sequence `1`, runs the same reducer against authoritative state, and publishes `counter = 1`. Because the player subscribed to both keys, Charm Sync may also have a regular status change ready.
+The server receives sequence `1` and records it as handled for the next tick. It runs the same reducer against authoritative state and publishes `counter = 1`. Nothing is sent yet.
 
-The server adapter sends one causally aligned envelope:
+On the next network tick, `predictionSync.flush()` takes one Charm Sync diff. Because the player subscribed to both keys, it may also hold a regular status change. The server adapter sends one causally aligned envelope:
 
 ```lua
 {
@@ -54,7 +54,7 @@ The server adapter sends one causally aligned envelope:
 }
 ```
 
-Actual Charm Sync batching may place changes in more than one ordered update. The adapter preserves that order.
+Actual Charm Sync batching may place changes in more than one ordered update. The adapter preserves that order. If the player sent several actions within one tick, the envelope carries the highest of their sequences.
 
 ## 3. Split and reconcile
 
@@ -78,7 +78,7 @@ The counter does not flicker back to `0` during reconciliation, and the status n
 
 ## Rejection
 
-If the server rejects the expected action, for example because `math.abs(amount) > 10`, it sends an acknowledgement-only payload after establishing that no relevant predicted patch is pending:
+If the server rejects the expected action, for example because `math.abs(amount) > 10`, sequence `1` is still handled. With no counter change to carry it, the next tick sends it alone:
 
 ```lua
 {
