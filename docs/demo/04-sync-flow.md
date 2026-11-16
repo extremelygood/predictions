@@ -1,90 +1,48 @@
-# Sync Flow
+# Sync flow
 
-Assume both server values and both client values have completed initial synchronization:
+Say this player's user id is `"7"`, he is on team red with an empty purse, and the chest `well` holds 5 coins. Both sides agree.
 
-```text
-counter      = 0
-serverStatus = "Waiting"
-```
+## 1. Dispatch
 
-## 1. Client prediction
+`client.dispatch(Demo.loot, "7", { chest = "well" })`:
 
-The client calls:
-
-```lua
-adjustCounter.dispatch({ amount = 1 })
-```
-
-The client runtime validates and reduces the action immediately. It publishes `counter = 1`, stores sequence `1` as pending, and sends an envelope shaped like:
+- `validate` passes.
+- The scope reads `purses["7"]` and `chests.well` from what the client's stores show.
+- The reducer returns the purse with 5 coins and the chest with none.
+- The client keeps the server's two entries aside, writes the two new ones, and sends:
 
 ```lua
 {
-    actionId = "AdjustCounter",
-    payload = { amount = 1 },
-    sequence = 1,
-    actionTime = 123.45,
+	actionId = "loot",
+	actor = "7",
+	payload = { chest = "well" },
+	sequence = 1,
+	actionTime = 1234.5,
 }
 ```
 
-At this point:
+The coins effect prints 5 now. The action is pending until the server acknowledges sequence 1.
 
-| Location | `counter` | `serverStatus` |
-| --- | ---: | --- |
-| Client | `1` (predicted) | `"Waiting"` |
-| Server | `0` | `"Waiting"` |
+## 2. The server receives it
 
-## 2. Authoritative processing
+The sequence is the expected one, so it is acknowledged first. `loot` is allowed, `validate` passes, and `isActor` agrees that this player may act as `"7"`. The time is clamped to the server's window. The scope and reducer run on the server's stores, and the two entries are written in one batch. Both writes are marked for the next tick.
 
-The server receives sequence `1` and records it as handled for the next tick. It runs the same reducer against authoritative state and publishes `counter = 1`. Nothing is sent yet.
+## 3. The tick
 
-On the next network tick, `predictionSync.flush()` takes one Charm Sync diff. Because the player subscribed to both keys, it may also hold a regular status change. The server adapter sends one causally aligned envelope:
+`flush` works each marked entry's change out once: the purse's `coins` field and the chest's `coins` field. Then, per client:
 
-```lua
-{
-    charmUpdates = {
-        {
-            type = "patch",
-            data = {
-                counter = 1,
-                serverStatus = "Round running",
-            },
-        },
-    },
-    processedSequence = 1,
-}
-```
+- This player: his acknowledgement, 1, and both changes. He holds his purse and the chest.
+- A teammate: both changes, and no acknowledgement.
+- A player on team blue: the chest's change only. He was never sent purse `"7"`, so he is told nothing of it.
 
-Actual Charm Sync batching may place changes in more than one ordered update. The adapter preserves that order. If the player sent several actions within one tick, the envelope carries the highest of their sequences.
+## 4. The client receives its message
 
-## 3. Split and reconcile
+In one batch:
 
-Inside one `Charm.batch`, `predictionSync.apply(payload)`:
+- The changes are applied to the entries kept aside, which become the server's new ones.
+- Sequence 1 is acknowledged, so the action is dropped. Nothing is pending.
+- The entries kept aside are shown. They equal the prediction, so nothing is written and nobody wakes.
 
-1. removes `counter` from the ordinary update stream;
-2. applies it to the runtime's authoritative shadow state;
-3. removes pending actions through sequence `1`;
-4. replays any later pending actions;
-5. publishes the final predicted counter once; and
-6. returns the remaining `serverStatus` update.
+Had the server rejected the action (another player emptied the chest first, say), the message would hold the acknowledgement and the chest's new state; the client would show the server's purse and chest, and the coins effect would print 0 again.
 
-The caller passes that returned update to `CharmSync.client.patch`, producing:
-
-| Location | `counter` | `serverStatus` |
-| --- | ---: | --- |
-| Client | `1` (confirmed) | `"Round running"` |
-| Server | `1` | `"Round running"` |
-
-The counter does not flicker back to `0` during reconciliation, and the status never changes early.
-
-## Rejection
-
-If the server rejects the expected action, for example because `math.abs(amount) > 10`, sequence `1` is still handled. With no counter change to carry it, the next tick sends it alone:
-
-```lua
-{
-    charmUpdates = {},
-    processedSequence = 1,
-}
-```
-
-Applying it removes sequence `1` and replays anything newer. With no remaining actions, the predicted counter rolls back to the last authoritative value. The regular status store is untouched.
+Had a message arrived before the acknowledgement with a change to the chest, the client would have worked `loot` out again on it, at once, and shown that.

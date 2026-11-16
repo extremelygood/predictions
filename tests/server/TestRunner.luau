@@ -2,6 +2,9 @@
 
 local LogService = game:GetService("LogService")
 
+-- How long expectWarning waits for the warning to reach LogService.MessageOut.
+local WARNING_TIMEOUT = 1
+
 export type TestCase = {
 	name: string,
 	run: () -> (),
@@ -63,7 +66,7 @@ local function expectDeepEqual(actual: any, expected: any, message: string?)
 end
 
 local function expectError(callback: () -> (), messageFragment: string?)
-	local succeeded, failure = pcall(callback)
+	local succeeded, failure: any = pcall(callback :: any)
 	if succeeded then
 		error("Expected callback to fail", 2)
 	end
@@ -83,12 +86,19 @@ local function expectWarning(callback: () -> (), messageFragment: string)
 		end
 	end)
 
-	local succeeded, failure = pcall(callback)
-	connection:Disconnect()
-
+	local succeeded, failure: any = pcall(callback :: any)
 	if not succeeded then
+		connection:Disconnect()
 		error(failure, 2)
 	end
+
+	-- MessageOut may be delivered after the warning was made, so give it a moment to arrive.
+	local deadline = os.clock() + WARNING_TIMEOUT
+	while not matched and os.clock() < deadline do
+		task.wait()
+	end
+	connection:Disconnect()
+
 	if not matched then
 		error(`Expected warning containing {formatValue(messageFragment)}`, 2)
 	end
@@ -117,7 +127,7 @@ local function run(cases: { TestCase })
 	local failures: { string } = {}
 
 	for _, case in cases do
-		local succeeded, failure = xpcall(case.run, function(message)
+		local succeeded, failure: any = xpcall(case.run :: any, function(message)
 			return debug.traceback(tostring(message), 2)
 		end)
 

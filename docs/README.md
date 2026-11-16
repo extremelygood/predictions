@@ -1,52 +1,35 @@
 # Predictions documentation
 
-Predictions provides client-predicted actions over server-authoritative state. A client applies an action locally for immediate feedback, sends the action to the server, and later replays any still-pending actions over the newest authoritative state.
+Predictions keeps a game's state in stores, replicates them from the server to each client, and lets a client apply its own actions at once while the server confirms them.
 
-The package is designed for top-level state that is already replicated with Charm Sync 0.4. Prediction is enabled per signal, so predicted and ordinary Charm signals can continue to use the same sync connection.
+## The model
 
-## How it fits together
-
-An integration has three parts:
-
-1. Define actions in shared code. Each action validates a payload and reduces the current state into a new state.
-2. Register those actions with a client runtime and a server runtime.
-3. Connect both runtimes through your action remote and the included Charm Sync adapter.
+1. **Stores.** State lives in keyed stores: entries under string keys, written with `set` or `patch`, every read current. `get(key)` follows one entry, `keys()` follows which keys exist, `all()` is the live table for plain loops, and `listen` tells each entry's change after the write. A single value is a `value` store.
+2. **Tables.** One list, `name -> store`, says what is replicated. Both sides build it with the same names. On the server every table has a view: `true` (everyone sees every entry) or a rule that says which entries a client may see.
+3. **The tick.** Once a frame the server builds one message per client: what changed in the entries he may see, and the acknowledgement of his actions. A client that already holds an entry is sent what changed inside it; one that newly sees it is sent it whole; one that stops seeing it is told it is gone. A client who joins newly sees everything in his view.
+4. **Actions.** An action has `validate`, an optional `scope` (the part of the state it sees) and `reduce` (the new state of that part). It is dispatched for an actor: `dispatch(action, actor, payload)`, the same call on the client and the server. A client's action arrives in an envelope that carries the actor, and the server asks the game whether that client may act as it.
+5. **Prediction.** On the client a dispatched action changes the stores at once. The library keeps the server's version of those entries aside. When messages arrive it replays what is still unconfirmed on top of the server's state, so a confirmed action wakes nobody, a rejected one snaps back, and a server change under a prediction is replayed over, not lost.
 
 ```text
 client dispatch
-    -> predict and publish locally
-    -> send action envelope
-    -> validate and reduce on server
-    -> on the next network tick, sync authoritative state and processed sequence
-    -> reconcile and replay remaining actions on client
+    -> validate, scope, reduce on what the stores show; write the result at once
+    -> send the envelope (sequence, actor, payload, action time)
+server receive
+    -> acknowledge the sequence; check the action, the actor and accept; scope, reduce, write
+server flush (once a frame)
+    -> per client: the acknowledgement and the changes he may see
+client receive
+    -> apply the changes; drop what is acknowledged; replay what is pending; show the result
 ```
-
-Reducers return complete state values for the state they are given: the whole predicted state on the client, and on the server the state `getState` returns for the action's payload. The runtime passes those values to your `publish` callback, which updates the stores used by the rest of the game.
-
-## Requirements
-
-- A shared Luau state shape on the client and server.
-- A reliable, ordered client-to-server transport for action envelopes.
-- Charm Sync 0.4 for authoritative state replication.
-- Predicted signals that are top-level keys of the client's prediction state. Each one is mapped to the Charm Sync key it is synced under.
-- A network tick: the server calls the adapter's `flush` once a frame.
-
-Predictions does not create remotes, install Charm Sync, or manage Charm Sync subscriptions. Those stay in game code.
 
 ## Read next
 
-- [Demo](demo/README.md) — a complete predicted counter alongside a regular server-only value.
-- [Actions](ACTIONS.md) — define reducers and validate or authorize dispatches.
-- [Runtimes](RUNTIMES.md) — set up the client and server.
-- [Charm Sync](CHARM_SYNC.md) — connect authoritative replication and reconciliation.
-- [Effects](EFFECTS.md) — trigger local one-time presentation work from accepted actions.
-- [API reference](PUBLIC_API.md) — the exported functions, objects, and payloads.
+- [Stores](STORES.md): `keyed`, `value` and `index`, and the rules every store keeps.
+- [Actions](ACTIONS.md): validate, scope and reduce; the write guard; payload types.
+- [Runtimes](RUNTIMES.md): the server and client configs and methods, sequences and the action time.
+- [Sync](SYNC.md): the tick, what a client is sent, joining and leaving, and what entries may hold.
+- [Effects](EFFECTS.md): one-time presentation from accepted actions.
+- [API reference](PUBLIC_API.md): every exported name and type.
+- [Demo](demo/README.md): a small game with actors, a scope, a view and an index.
 
-All Predictions objects use dot syntax:
-
-```lua
-local action = client.register(ActionDefinition)
-action.dispatch(payload)
-```
-
-Roblox instances still use their normal colon syntax.
+All Predictions objects use dot syntax: `server.flush()`, `store.get(key)`. Roblox instances keep their colon syntax.

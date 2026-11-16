@@ -1,83 +1,82 @@
-# Shared Stores and Action
+# Shared stores and actions
 
-The server and client each load their own copy of these stores. Charm signals provide a tiny getter/setter pair, which keeps the example focused on how Predictions integrates with synchronization.
-
-## Predicted counter store
-
-`CounterStore` is the game-facing value published by the prediction runtime. Client code may read it immediately after a successful dispatch.
+The server and each client require this module, so each side has its own stores. Both build the same table list, so the names on the wire match.
 
 ```lua
 --!strict
--- ReplicatedStorage/Demo/Stores/CounterStore.luau
+-- ReplicatedStorage.Demo
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Charm = require(ReplicatedStorage.Packages.Charm)
+local Predictions = require(ReplicatedStorage.Packages.Predictions)
 
-local getCounter, setCounter = Charm.signal(0)
-
-return table.freeze({
-    get = getCounter,
-    set = setCounter,
-})
-```
-
-## Regular server-status store
-
-`ServerStatusStore` is authoritative-only. Nothing on the client predicts it; the client setter is registered directly with Charm Sync.
-
-```lua
---!strict
--- ReplicatedStorage/Demo/Stores/ServerStatusStore.luau
-
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Charm = require(ReplicatedStorage.Packages.Charm)
-
-local getServerStatus, setServerStatus = Charm.signal("Waiting")
-
-return table.freeze({
-    get = getServerStatus,
-    set = setServerStatus,
-})
-```
-
-## Shared predicted action
-
-Only the counter belongs to prediction state. The regular status store is deliberately absent because it never needs pending-action replay.
-
-```lua
---!strict
--- ReplicatedStorage/Demo/AdjustCounter.luau
-
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Prediction = require(ReplicatedStorage.Packages.Predictions)
-
-type State = {
-    counter: number,
+export type Purse = { coins: number, team: string }
+export type Chest = { coins: number }
+export type State = {
+	purses: { [string]: Purse },
+	chests: { [string]: Chest },
 }
 
-type Payload = {
-    amount: number,
-}
+-- Keyed by the player's user id, as a string.
+local purses = Predictions.keyed() :: Predictions.Keyed<string, Purse>
+local chests = Predictions.keyed() :: Predictions.Keyed<string, Chest>
+local tables: Predictions.Tables = { purses = purses, chests = chests }
 
-local AdjustCounter = Prediction.defineAction({
-    id = "AdjustCounter",
+-- The purses of each team.
+local teams = Predictions.index(purses, function(purse: Purse): { string }
+	return { purse.team }
+end)
 
-    validate = function(payload: any): boolean
-        return type(payload) == "table"
-            and type(payload.amount) == "number"
-            and payload.amount == payload.amount
-            and payload.amount > -math.huge
-            and payload.amount < math.huge
-    end,
-
-    reduce = function(state: State, payload: Payload): State
-        return {
-            counter = state.counter + payload.amount,
-        }
-    end,
+-- The actor empties a chest into his purse.
+local loot = Predictions.defineAction({
+	id = "loot",
+	validate = function(payload: unknown): boolean
+		return type(payload) == "table" and type((payload :: any).chest) == "string"
+	end,
+	scope = function(world: State, actor: string, payload: { chest: string }): State
+		return {
+			purses = { [actor] = world.purses[actor] },
+			chests = { [payload.chest] = world.chests[payload.chest] },
+		}
+	end,
+	reduce = function(state: State, payload: { chest: string }, context: Predictions.ActionContext<string>): State?
+		local purse = state.purses[context.actor]
+		local chest = state.chests[payload.chest]
+		if purse == nil or chest == nil or chest.coins == 0 then
+			return nil
+		end
+		return {
+			purses = { [context.actor] = { coins = purse.coins + chest.coins, team = purse.team } },
+			chests = { [payload.chest] = { coins = 0 } },
+		}
+	end,
 })
 
-return AdjustCounter
+-- The server fills a chest again.
+local refill = Predictions.defineAction({
+	id = "refill",
+	validate = function(payload: unknown): boolean
+		return type(payload) == "table" and type((payload :: any).chest) == "string"
+	end,
+	scope = function(world: State, _actor: string, payload: { chest: string, coins: number }): State
+		return { purses = {}, chests = { [payload.chest] = world.chests[payload.chest] } }
+	end,
+	reduce = function(state: State, payload: { chest: string, coins: number }): State?
+		state.chests[payload.chest] = { coins = payload.coins }
+		return state
+	end,
+})
+
+return {
+	purses = purses,
+	chests = chests,
+	tables = tables,
+	teams = teams,
+	loot = loot,
+	refill = refill,
+}
 ```
 
-The reducer returns a new absolute prediction state and does not write either store directly. Runtime `publish` callbacks perform store writes after the reducer succeeds.
+- `loot` names a scope: the actor's purse and the chest its payload names. Its reducer may change those two entries and nothing else; writing another existing purse would be rejected by the write guard.
+- `refill` is only ever dispatched by the server. The server never allows it, so an envelope that names it is warned about and rejected. Its scope gives `purses` as `{}`: the typed `State` names every table, and the action needs none of the purses. Its reducer changes the chests table in place and returns the state, which is allowed; the entry itself is a new table.
+- `teams` is kept with every write to `purses`, on each side. On a client it holds the purses that client was sent.
+- Payload types come from the reducers: `client.dispatch(Demo.loot, me, { chest = 5 })` is a type error.

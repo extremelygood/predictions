@@ -6,6 +6,8 @@
 /*.rbxl.lock
 
 wally.lock
+/Packages/
+/predictions-tests.rbxlx
 .vscode
 sourcemap.json
 .worktrees/

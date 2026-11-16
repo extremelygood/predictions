@@ -1,45 +1,39 @@
 --!strict
 
-local adapterMain = require(script.charmSync.adapterMain)
 local Action = require(script.action)
 local Client = require(script.client)
 local Effect = require(script.effect)
 local Server = require(script.server)
+local Store = require(script.store)
 local Types = require(script._types)
 
-export type Sequence = Types.Sequence
-export type Timestamp = Types.Timestamp
-export type ActionContext = Types.ActionContext
-export type ActionValidator<Payload> = Types.ActionValidator<Payload>
-export type ActionReducer<State, Payload> = Types.ActionReducer<State, Payload>
-export type ActionConfig<State, Payload> = Types.ActionConfig<State, Payload>
-export type ActionDefinition<State, Payload> = Types.ActionDefinition<State, Payload>
-export type ActionEnvelope<Payload> = Types.ActionEnvelope<Payload>
-export type AnyActionEnvelope = Types.AnyActionEnvelope
-export type BoundAction<Payload> = Types.BoundAction<Payload>
+export type Keyed<K, V> = Types.Keyed<K, V>
+export type Value<V> = Types.Value<V>
+export type Index<K, I> = Types.Index<K, I>
+export type Tables = Types.Tables
+export type ActionContext<Actor> = Types.ActionContext<Actor>
+export type ActionDefinition<State, Payload, Actor> = Types.ActionDefinition<State, Payload, Actor>
+export type ActionEnvelope = Types.ActionEnvelope
+export type View<Client> = Types.View<Client>
+export type ServerConfig<State, Actor, Client> = Types.ServerConfig<State, Actor, Client>
+export type ServerRuntime<State, Actor, Client> = Types.ServerRuntime<State, Actor, Client>
+export type ClientConfig<State, Actor> = Types.ClientConfig<State, Actor>
+export type ClientRuntime<State, Actor> = Types.ClientRuntime<State, Actor>
 export type EffectConfig = Types.EffectConfig
 export type EffectListener<Payload> = Types.EffectListener<Payload>
 export type EffectConnection = Types.EffectConnection
 export type Effect<Payload> = Types.Effect<Payload>
-export type Clock = Types.Clock
-export type Publisher<State> = Types.Publisher<State>
-export type ClientConfig<State> = Types.ClientConfig<State>
-export type ClientRuntime<State> = Types.ClientRuntime<State>
-export type ServerActionOptions<Actor, Payload> = Types.ServerActionOptions<Actor, Payload>
-export type ServerReplication<Actor> = Types.ServerReplication<Actor>
-export type ServerConfig<State, Actor> = Types.ServerConfig<State, Actor>
-export type ServerRuntime<State, Actor> = Types.ServerRuntime<State, Actor>
-local Prediction = {
+
+local Predictions = {
+	keyed = Store.keyed,
+	value = Store.value,
+	index = Store.index,
 	defineAction = Action.define,
 	defineEffect = Effect.define,
-	client = Client,
 	server = Server,
-
-	adapters = {
-		charmSync = adapterMain,
-	},
+	client = Client,
 }
 
-export type PredictionLibrary = typeof(Prediction)
+export type PredictionsLibrary = typeof(Predictions)
 
-return table.freeze(Prediction)
+return table.freeze(Predictions)

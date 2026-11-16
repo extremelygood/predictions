@@ -1,108 +1,83 @@
-# Server Setup
-
-The server owns both authoritative values. It also gives the Predictions adapter exclusive ownership of `CharmSync.server.connect` and of every flush, so a counter patch and its processed-sequence watermark are sent together on the network tick.
+# Server
 
 ```lua
 --!strict
--- ServerScriptService/DemoServer.server.luau
+-- ServerScriptService.DemoServer
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local Predictions = require(ReplicatedStorage.Packages.Predictions)
+local Demo = require(ReplicatedStorage.Demo)
 
-local CharmSync = require(ReplicatedStorage.Packages.CharmSync)
-local Prediction = require(ReplicatedStorage.Packages.Predictions)
+local remote = ReplicatedStorage.DemoRemote :: RemoteEvent
 
-local AdjustCounter = require(ReplicatedStorage.Demo.AdjustCounter)
-local CounterStore = require(ReplicatedStorage.Demo.Stores.CounterStore)
-local ServerStatusStore = require(ReplicatedStorage.Demo.Stores.ServerStatusStore)
+-- Not replicated: each player's team, by user id.
+local teamOf = Predictions.keyed() :: Predictions.Keyed<string, string>
 
-local remotes = ReplicatedStorage.Remotes
-local actionRemote = remotes.PredictionAction :: RemoteEvent
-local readyRemote = remotes.StateReady :: RemoteEvent
-local syncRemote = remotes.StateSync :: RemoteEvent
+local server = Predictions.server({
+	tables = Demo.tables,
+	views = {
+		chests = true,
+		-- A player sees the purses of his own team.
+		purses = function(player: Player)
+			local team = teamOf.get(tostring(player.UserId))
+			return function(_key: string, purse: Demo.Purse): boolean
+				return purse.team == team
+			end
+		end,
+	},
+	now = function(): number
+		return workspace:GetServerTimeNow()
+	end,
+	-- A player acts as his own purse.
+	isActor = function(player: Player, actor: unknown): boolean
+		return actor == tostring(player.UserId)
+	end,
+	actionTime = { maxAge = 0.5, maxLead = 0.05 },
+} :: Predictions.ServerConfig<Demo.State, string, Player>)
 
-type State = {
-    counter: number,
-}
+server.allow(Demo.loot)
 
-type AdjustPayload = {
-    amount: number,
-}
+Demo.chests.patch({ well = { coins = 5 }, tower = { coins = 8 } })
 
-local predictionSync = Prediction.adapters.charmSync.server({
-    charmSync = CharmSync,
-
-    send = function(player: Player, payload)
-        syncRemote:FireClient(player, payload)
-    end,
-})
-
--- Start before the runtime receives any client action.
-predictionSync.start()
-
-local server = Prediction.server({
-    -- The demo's actions all work on the whole state, so getState ignores the payload.
-    getState = function(_payload: unknown): State
-        return {
-            counter = CounterStore.get(),
-        }
-    end,
-
-    publish = function(_before: State, after: State)
-        CounterStore.set(after.counter)
-    end,
-
-    now = function(): number
-        return workspace:GetServerTimeNow()
-    end,
-
-    replication = predictionSync,
-})
-
-local adjustCounter = server.register(AdjustCounter, {
-    acceptClient = function(_player: Player, payload: AdjustPayload): boolean
-        -- A small server-only authorization rule for this demo.
-        return math.abs(payload.amount) <= 10
-    end,
-})
-
-actionRemote.OnServerEvent:Connect(function(player: Player, envelope)
-    server.receive(player, envelope)
-end)
-
-readyRemote.OnServerEvent:Connect(function(player: Player)
-    -- Both signals share one Charm Sync subscription.
-    CharmSync.server.addSignalsToClient(player, {
-        counter = CounterStore.get,
-        serverStatus = ServerStatusStore.get,
-    })
+Players.PlayerAdded:Connect(function(player: Player)
+	local team = if #Players:GetPlayers() % 2 == 0 then "red" else "blue"
+	teamOf.set(tostring(player.UserId), team)
+	Demo.purses.set(tostring(player.UserId), { coins = 0, team = team })
+	server.addClient(player)
 end)
 
 Players.PlayerRemoving:Connect(function(player: Player)
-    CharmSync.server.removeClient(player)
-    server.removeActor(player)
+	server.removeClient(player)
+	Demo.purses.set(tostring(player.UserId), nil)
+	teamOf.set(tostring(player.UserId), nil)
 end)
 
--- The network tick: one Charm Sync diff a frame, each acknowledgement with it.
+remote.OnServerEvent:Connect(function(player: Player, envelope: unknown)
+	server.receive(player, envelope)
+end)
+
 RunService.Heartbeat:Connect(function()
-    predictionSync.flush()
+	for player, message in server.flush() do
+		remote:FireClient(player, message)
+	end
 end)
 
--- Example of an ordinary authoritative update. The client does not predict it.
-ServerStatusStore.set("Round running")
+-- Every half minute the chests fill again.
+task.spawn(function()
+	while true do
+		task.wait(30)
+		for chest in Demo.chests.keys() do
+			server.dispatch(Demo.refill, "server", { chest = chest, coins = 5 })
+		end
+	end
+end)
 ```
 
-Do not install another `CharmSync.server.connect` callback while `predictionSync` is started, and never call `CharmSync.server.flush` yourself. The adapter owns that connection, stops Charm Sync's own interval, and sends through its configured `send` callback only when `predictionSync.flush()` runs. Call it once a frame, outside any `Charm.batch`, where `CounterStore.get` returns the current counter. A handled action's acknowledgement waits for that tick, so it always arrives with the counter that holds the action.
-
-Call `server.removeActor(player)` when a player leaves, so his sequence and any waiting acknowledgement are forgotten.
-
-The originating player must already be subscribed to `counter` before sending actions. Otherwise Charm Sync cannot produce the authoritative counter patch that the processed sequence is meant to accompany, and the acknowledgement goes alone.
-
-Direct server actions are also available from the same object returned by `register`:
-
-```lua
-adjustCounter.dispatch({ amount = 1 })
-```
-
-Direct dispatch runs the shared reducer authoritatively on the state `getState` returns and publishes it, without calling `acceptClient` or advancing a client sequence. Registering the same action ID twice is an error.
+- `teamOf` is a store the server never replicates. The purse view reads it, so a player's view runs again only when his team changes, not every time a purse's coins do.
+- The rule is called at each tick for the purses that changed, and for every purse when the player joins or his view runs again.
+- `isActor` lets a player act as his own purse only. An envelope naming another purse is acknowledged and ignored, and the sender's prediction rolls back.
+- His team is written before `server.addClient`, so his view starts from it. His first message, at the next tick, holds every chest and the purses of his team, his own included.
+- `flush` runs once a frame, outside any batch, and every message it returns is sent as it is.
+- `server.dispatch` is the server's own action: no `allow`, no `validate`, no actor check.
